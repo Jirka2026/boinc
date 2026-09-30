@@ -6,6 +6,7 @@ using namespace BOINC_Xbox;
 using namespace Platform;
 using namespace concurrency;
 using namespace Windows::ApplicationModel::Activation;
+using namespace Windows::Foundation;
 using namespace Windows::Networking::Connectivity;
 using namespace Windows::Storage;
 using namespace Windows::System;
