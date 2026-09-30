@@ -154,12 +154,15 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     memoryText->FontSize = 18;
 
     auto networkText = ref new TextBlock();
-    networkText->Text = ref new String(L"Network: ");
-    networkText->Text = networkText->Text + GetNetworkState();
+    std::wstring networkLine = L"Network: ";
+    networkLine += GetNetworkState()->Data();
+    networkText->Text = ToPlatformString(networkLine);
     networkText->FontSize = 18;
 
     auto storageText = ref new TextBlock();
-    storageText->Text = ref new String(L"Data folder: ") + ApplicationData::Current->LocalFolder->Path;
+    std::wstring storageLine = L"Data folder: ";
+    storageLine += ApplicationData::Current->LocalFolder->Path->Data();
+    storageText->Text = ToPlatformString(storageLine);
     storageText->FontSize = 16;
     storageText->TextWrapping = TextWrapping::Wrap;
     storageText->Opacity = 0.8;
@@ -185,9 +188,10 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     try
     {
         auto values = ApplicationData::Current->LocalSettings->Values;
-        if (values->HasKey(L"ProjectUrl"))
+        auto projectUrlKey = ref new String(L"ProjectUrl");
+        if (values->HasKey(projectUrlKey))
         {
-            auto saved = dynamic_cast<String^>(values->Lookup(L"ProjectUrl"));
+            auto saved = dynamic_cast<String^>(values->Lookup(projectUrlKey));
             if (saved != nullptr)
             {
                 urlBox->Text = saved;
@@ -227,7 +231,13 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
 
     auto appendLog = [logText](String^ message)
     {
-        logText->Text = logText->Text + message + ref new String(L"\n");
+        std::wstring combined = logText->Text ? logText->Text->Data() : L"";
+        if (message != nullptr)
+        {
+            combined += message->Data();
+        }
+        combined += L"\n";
+        logText->Text = ToPlatformString(combined);
     };
 
     testButton->Click += ref new RoutedEventHandler(
@@ -246,13 +256,15 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             try
             {
                 ApplicationData::Current->LocalSettings->Values->Insert(
-                    L"ProjectUrl",
+                    ref new String(L"ProjectUrl"),
                     ToPlatformString(baseUrl)
                 );
             }
             catch (Exception^ ex)
             {
-                appendLog(ref new String(L"Warning: Could not save Project URL: ") + ex->Message);
+                std::wstring message = L"Warning: Could not save Project URL: ";
+                message += ex->Message->Data();
+                appendLog(ToPlatformString(message));
             }
 
             Uri^ uri = nullptr;
@@ -262,13 +274,15 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             }
             catch (Exception^ ex)
             {
-                appendLog(ref new String(L"ERROR: Invalid URL: ") + ex->Message);
+                std::wstring message = L"ERROR: Invalid URL: ";
+                message += ex->Message->Data();
+                appendLog(ToPlatformString(message));
                 return;
             }
 
             logText->Text = ref new String(L"");
             appendLog(ref new String(L"Testing BOINC project..."));
-            appendLog(ref new String(L"GET ") + endpointString);
+            appendLog(ToPlatformString(L"GET " + endpoint));
             testButton->IsEnabled = false;
 
             auto client = ref new HttpClient();
@@ -328,7 +342,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         }
                         catch (Exception^ ex)
                         {
-                            appendLog(ref new String(L"ERROR: ") + ex->Message);
+                            std::wstring message = L"ERROR: ";
+                            message += ex->Message->Data();
+                            appendLog(ToPlatformString(message));
                         }
                         catch (...)
                         {
