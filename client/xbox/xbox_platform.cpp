@@ -1,6 +1,10 @@
 // This file is part of BOINC.
 // Xbox Series X Developer Mode platform adaptation.
 
+#ifdef BOINC_XBOX_UWP
+#include "pch.h"
+#endif
+
 #include "xbox_platform.h"
 
 #ifdef BOINC_XBOX
