@@ -242,3 +242,6 @@ stage/
 # vim temporary files
 *.swp
 
+
+# BOINC Xbox Visual Studio generated packages
+/xbox/AppPackages/
