@@ -181,6 +181,9 @@ static void signal_handler(int signum, siginfo_t*, void*) {
 #endif
 
 static void init_core_client(int argc, char** argv) {
+#ifdef BOINC_XBOX
+    boinc_xbox_platform_init();
+#endif
     setbuf(stdout, 0);
     setbuf(stderr, 0);
 
