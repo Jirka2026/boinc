@@ -90,9 +90,6 @@
     <ApplicationDefinition Include="App.xaml">
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Page Include="MainPage.xaml">
-      <SubType>Designer</SubType>
-    </Page>
   </ItemGroup>
 
   <ItemGroup>
@@ -101,9 +98,6 @@
     </ClCompile>
     <ClCompile Include="App.xaml.cpp">
       <DependentUpon>App.xaml</DependentUpon>
-    </ClCompile>
-    <ClCompile Include="MainPage.xaml.cpp">
-      <DependentUpon>MainPage.xaml</DependentUpon>
     </ClCompile>
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -114,9 +108,6 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
-    </ClInclude>
-    <ClInclude Include="MainPage.xaml.h">
-      <DependentUpon>MainPage.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="..\..\client\xbox\xbox_platform.h" />
   </ItemGroup>
