@@ -1,0 +1,8 @@
+#pragma once
+
+#include <collection.h>
+#include <ppltasks.h>
+#include <string>
+#include <cstring>
+
+#include <windows.h>
