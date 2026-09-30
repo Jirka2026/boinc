@@ -101,7 +101,9 @@
     </ClCompile>
     <ClCompile Include="App.xaml.cpp" />
     <ClCompile Include="MainPage.xaml.cpp" />
-    <ClCompile Include="..\..\client\xbox\xbox_platform.cpp" />
+    <ClCompile Include="..\..\client\xbox\xbox_platform.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
   </ItemGroup>
 
   <ItemGroup>
