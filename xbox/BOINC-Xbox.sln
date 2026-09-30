@@ -1,0 +1,20 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "BOINC-Xbox", "BOINC-Xbox\BOINC-Xbox.vcxproj", "{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Debug|x64.ActiveCfg = Debug|x64
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Debug|x64.Build.0 = Debug|x64
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Debug|x64.Deploy.0 = Debug|x64
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Release|x64.ActiveCfg = Release|x64
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Release|x64.Build.0 = Release|x64
+		{B0C1C7C4-7D53-4A9D-9C68-92D6CE0B23C1}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+EndGlobal
