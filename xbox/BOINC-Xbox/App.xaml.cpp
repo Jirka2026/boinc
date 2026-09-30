@@ -4,11 +4,84 @@
 
 using namespace BOINC_Xbox;
 using namespace Platform;
+using namespace concurrency;
 using namespace Windows::ApplicationModel::Activation;
+using namespace Windows::Networking::Connectivity;
+using namespace Windows::Storage;
+using namespace Windows::System;
 using namespace Windows::UI;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
 using namespace Windows::UI::Xaml::Media;
+using namespace Windows::Web::Http;
+
+namespace
+{
+    String^ ToPlatformString(const std::wstring& value)
+    {
+        return ref new String(value.c_str());
+    }
+
+    std::wstring NormalizeProjectUrl(String^ value)
+    {
+        std::wstring url = value ? value->Data() : L"";
+
+        while (!url.empty() && iswspace(url.front()))
+        {
+            url.erase(url.begin());
+        }
+
+        while (!url.empty() && iswspace(url.back()))
+        {
+            url.pop_back();
+        }
+
+        if (!url.empty() && url.find(L"://") == std::wstring::npos)
+        {
+            url = L"https://" + url;
+        }
+
+        while (!url.empty() && url.back() == L'/')
+        {
+            url.pop_back();
+        }
+
+        return url;
+    }
+
+    String^ GetNetworkState()
+    {
+        try
+        {
+            auto profile = NetworkInformation::GetInternetConnectionProfile();
+            if (profile == nullptr)
+            {
+                return ref new String(L"Offline");
+            }
+
+            auto level = profile->GetNetworkConnectivityLevel();
+            if (level == NetworkConnectivityLevel::InternetAccess)
+            {
+                return ref new String(L"Online");
+            }
+
+            if (level == NetworkConnectivityLevel::ConstrainedInternetAccess)
+            {
+                return ref new String(L"Constrained");
+            }
+
+            if (level == NetworkConnectivityLevel::LocalAccess)
+            {
+                return ref new String(L"Local only");
+            }
+        }
+        catch (Exception^)
+        {
+        }
+
+        return ref new String(L"Offline");
+    }
+}
 
 App::App()
 {
@@ -22,45 +95,265 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     auto root = ref new Grid();
     root->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255, 16, 24, 32));
 
+    auto scroll = ref new ScrollViewer();
+    scroll->HorizontalScrollMode = ScrollMode::Disabled;
+    scroll->VerticalScrollMode = ScrollMode::Auto;
+    scroll->VerticalScrollBarVisibility = ScrollBarVisibility::Auto;
+
     auto panel = ref new StackPanel();
     panel->HorizontalAlignment = HorizontalAlignment::Center;
-    panel->VerticalAlignment = VerticalAlignment::Center;
-    panel->Spacing = 18;
+    panel->VerticalAlignment = VerticalAlignment::Top;
+    panel->Width = 1040;
+    panel->Margin = Thickness(64);
+    panel->Spacing = 14;
 
     auto title = ref new TextBlock();
     title->Text = ref new String(L"BOINC Xbox");
-    title->FontSize = 56;
+    title->FontSize = 52;
     title->HorizontalAlignment = HorizontalAlignment::Center;
 
     auto subtitle = ref new TextBlock();
-    subtitle->Text = ref new String(L"Xbox Series X Developer Mode port");
-    subtitle->FontSize = 24;
+    subtitle->Text = ref new String(L"v0.2 - Network / Project test");
+    subtitle->FontSize = 22;
+    subtitle->Opacity = 0.8;
     subtitle->HorizontalAlignment = HorizontalAlignment::Center;
 
-    auto platformLabel = ref new TextBlock();
-    platformLabel->Text = ref new String(L"Platform layer:");
-    platformLabel->FontSize = 20;
-    platformLabel->Margin = Thickness(0, 26, 0, 0);
+    auto statusBox = ref new Border();
+    statusBox->Margin = Thickness(0, 18, 0, 8);
+    statusBox->Padding = Thickness(22);
+    statusBox->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255, 32, 42, 51));
+
+    auto statusPanel = ref new StackPanel();
+    statusPanel->Spacing = 7;
 
     const char* platformName = boinc_xbox_platform_name();
     std::string platformAscii(platformName ? platformName : "unknown");
     std::wstring platformWide(platformAscii.begin(), platformAscii.end());
 
+    unsigned int cpuThreads = std::thread::hardware_concurrency();
+    unsigned long long memoryLimitMb = 0;
+
+    try
+    {
+        memoryLimitMb = MemoryManager::AppMemoryUsageLimit / (1024ULL * 1024ULL);
+    }
+    catch (Exception^)
+    {
+    }
+
     auto platformText = ref new TextBlock();
-    platformText->Text = ref new String(platformWide.c_str());
+    platformText->Text = ToPlatformString(L"Platform: " + platformWide);
     platformText->FontSize = 18;
 
-    auto statusText = ref new TextBlock();
-    statusText->Text = ref new String(L"Xbox platform scaffold initialized");
-    statusText->FontSize = 18;
+    auto cpuText = ref new TextBlock();
+    cpuText->Text = ToPlatformString(L"CPU threads visible to app: " + std::to_wstring(cpuThreads));
+    cpuText->FontSize = 18;
+
+    auto memoryText = ref new TextBlock();
+    memoryText->Text = ToPlatformString(L"App memory limit: " + std::to_wstring(memoryLimitMb) + L" MB");
+    memoryText->FontSize = 18;
+
+    auto networkText = ref new TextBlock();
+    networkText->Text = ref new String(L"Network: ");
+    networkText->Text = networkText->Text + GetNetworkState();
+    networkText->FontSize = 18;
+
+    auto storageText = ref new TextBlock();
+    storageText->Text = ref new String(L"Data folder: ") + ApplicationData::Current->LocalFolder->Path;
+    storageText->FontSize = 16;
+    storageText->TextWrapping = TextWrapping::Wrap;
+    storageText->Opacity = 0.8;
+
+    statusPanel->Children->Append(platformText);
+    statusPanel->Children->Append(cpuText);
+    statusPanel->Children->Append(memoryText);
+    statusPanel->Children->Append(networkText);
+    statusPanel->Children->Append(storageText);
+    statusBox->Child = statusPanel;
+
+    auto projectTitle = ref new TextBlock();
+    projectTitle->Text = ref new String(L"BOINC project");
+    projectTitle->FontSize = 24;
+    projectTitle->Margin = Thickness(0, 16, 0, 0);
+
+    auto urlBox = ref new TextBox();
+    urlBox->Header = ref new String(L"Project URL");
+    urlBox->PlaceholderText = ref new String(L"https://project.example.org/");
+    urlBox->FontSize = 20;
+    urlBox->MinHeight = 50;
+
+    try
+    {
+        auto values = ApplicationData::Current->LocalSettings->Values;
+        if (values->HasKey(L"ProjectUrl"))
+        {
+            auto saved = dynamic_cast<String^>(values->Lookup(L"ProjectUrl"));
+            if (saved != nullptr)
+            {
+                urlBox->Text = saved;
+            }
+        }
+    }
+    catch (Exception^)
+    {
+    }
+
+    auto testButton = ref new Button();
+    testButton->Content = ref new String(L"Connect / Test project");
+    testButton->FontSize = 20;
+    testButton->Padding = Thickness(24, 12, 24, 12);
+    testButton->HorizontalAlignment = HorizontalAlignment::Left;
+
+    auto endpointText = ref new TextBlock();
+    endpointText->Text = ref new String(L"Endpoint: get_project_config.php");
+    endpointText->FontSize = 15;
+    endpointText->Opacity = 0.65;
+
+    auto logTitle = ref new TextBlock();
+    logTitle->Text = ref new String(L"Log");
+    logTitle->FontSize = 24;
+    logTitle->Margin = Thickness(0, 18, 0, 0);
+
+    auto logBorder = ref new Border();
+    logBorder->Padding = Thickness(18);
+    logBorder->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255, 24, 31, 38));
+    logBorder->MinHeight = 210;
+
+    auto logText = ref new TextBlock();
+    logText->Text = ref new String(L"Ready. Enter a BOINC project URL and run the network test.\n");
+    logText->FontSize = 16;
+    logText->TextWrapping = TextWrapping::Wrap;
+    logBorder->Child = logText;
+
+    auto appendLog = [logText](String^ message)
+    {
+        logText->Text = logText->Text + message + ref new String(L"\n");
+    };
+
+    testButton->Click += ref new RoutedEventHandler(
+        [urlBox, testButton, logText, appendLog](Object^, RoutedEventArgs^)
+        {
+            std::wstring baseUrl = NormalizeProjectUrl(urlBox->Text);
+            if (baseUrl.empty())
+            {
+                appendLog(ref new String(L"ERROR: Project URL is empty."));
+                return;
+            }
+
+            std::wstring endpoint = baseUrl + L"/get_project_config.php";
+            auto endpointString = ToPlatformString(endpoint);
+
+            try
+            {
+                ApplicationData::Current->LocalSettings->Values->Insert(
+                    L"ProjectUrl",
+                    ToPlatformString(baseUrl)
+                );
+            }
+            catch (Exception^ ex)
+            {
+                appendLog(ref new String(L"Warning: Could not save Project URL: ") + ex->Message);
+            }
+
+            Uri^ uri = nullptr;
+            try
+            {
+                uri = ref new Uri(endpointString);
+            }
+            catch (Exception^ ex)
+            {
+                appendLog(ref new String(L"ERROR: Invalid URL: ") + ex->Message);
+                return;
+            }
+
+            logText->Text = ref new String(L"");
+            appendLog(ref new String(L"Testing BOINC project..."));
+            appendLog(ref new String(L"GET ") + endpointString);
+            testButton->IsEnabled = false;
+
+            auto client = ref new HttpClient();
+
+            create_task(client->GetAsync(uri))
+                .then(
+                    [](HttpResponseMessage^ response)
+                    {
+                        if (!response->IsSuccessStatusCode)
+                        {
+                            std::wstring message =
+                                L"HTTP request failed, status " +
+                                std::to_wstring(static_cast<unsigned int>(response->StatusCode));
+                            throw ref new FailureException(ToPlatformString(message));
+                        }
+
+                        return create_task(response->Content->ReadAsStringAsync());
+                    }
+                )
+                .then(
+                    [appendLog](String^ body)
+                    {
+                        std::wstring xml = body ? body->Data() : L"";
+                        bool looksLikeBoinc =
+                            xml.find(L"<project_config") != std::wstring::npos ||
+                            xml.find(L"<project>") != std::wstring::npos;
+
+                        appendLog(ref new String(L"HTTP: OK"));
+
+                        if (looksLikeBoinc)
+                        {
+                            appendLog(ref new String(L"BOINC project configuration detected."));
+                        }
+                        else
+                        {
+                            appendLog(ref new String(L"Response received, but BOINC project XML was not recognized."));
+                        }
+
+                        if (xml.size() > 3500)
+                        {
+                            xml.resize(3500);
+                            xml += L"\n...[response truncated]";
+                        }
+
+                        appendLog(ref new String(L""));
+                        appendLog(ref new String(L"Server response:"));
+                        appendLog(ToPlatformString(xml));
+                    },
+                    task_continuation_context::use_current()
+                )
+                .then(
+                    [appendLog, testButton](task<void> previousTask)
+                    {
+                        try
+                        {
+                            previousTask.get();
+                        }
+                        catch (Exception^ ex)
+                        {
+                            appendLog(ref new String(L"ERROR: ") + ex->Message);
+                        }
+                        catch (...)
+                        {
+                            appendLog(ref new String(L"ERROR: Unknown network failure."));
+                        }
+
+                        testButton->IsEnabled = true;
+                    },
+                    task_continuation_context::use_current()
+                );
+        }
+    );
 
     panel->Children->Append(title);
     panel->Children->Append(subtitle);
-    panel->Children->Append(platformLabel);
-    panel->Children->Append(platformText);
-    panel->Children->Append(statusText);
+    panel->Children->Append(statusBox);
+    panel->Children->Append(projectTitle);
+    panel->Children->Append(urlBox);
+    panel->Children->Append(testButton);
+    panel->Children->Append(endpointText);
+    panel->Children->Append(logTitle);
+    panel->Children->Append(logBorder);
 
-    root->Children->Append(panel);
+    scroll->Content = panel;
+    root->Children->Append(scroll);
 
     Window::Current->Content = root;
     Window::Current->Activate();
