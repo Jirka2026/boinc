@@ -65,7 +65,11 @@
 #include "http_curl.h"
 #include "sandbox.h"
 
-#include "main.h"\n\n#ifdef BOINC_XBOX\n#include "xbox/xbox_platform.h"\n#endif
+#include "main.h"
+
+#ifdef BOINC_XBOX
+#include "xbox/xbox_platform.h"
+#endif
 
 // Log informational messages to system specific places
 //
