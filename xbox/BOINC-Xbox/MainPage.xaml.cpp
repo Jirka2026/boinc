@@ -16,5 +16,5 @@ MainPage::MainPage()
     std::wstring platformWide(platformAscii.begin(), platformAscii.end());
 
     PlatformText->Text = ref new String(platformWide.c_str());
-    StatusText->Text = "Xbox platform scaffold initialized";
+    StatusText->Text = ref new String(L"Xbox platform scaffold initialized");
 }
