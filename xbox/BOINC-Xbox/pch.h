@@ -4,4 +4,5 @@
 #include <ppltasks.h>
 #include <string>
 #include <cstring>
-
+#include <cwctype>
+#include <thread>
