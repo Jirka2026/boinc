@@ -70,6 +70,68 @@ namespace
         return url;
     }
 
+    std::wstring ExtractFirstTag(const std::wstring& xml, const std::wstring& tag)
+    {
+        const std::wstring open = L"<" + tag + L">";
+        const std::wstring close = L"</" + tag + L">";
+        const size_t startTag = xml.find(open);
+        if (startTag == std::wstring::npos)
+        {
+            return L"";
+        }
+
+        const size_t valueStart = startTag + open.size();
+        const size_t valueEnd = xml.find(close, valueStart);
+        if (valueEnd == std::wstring::npos)
+        {
+            return L"";
+        }
+
+        return xml.substr(valueStart, valueEnd - valueStart);
+    }
+
+    std::vector<std::wstring> ExtractAllTags(const std::wstring& xml, const std::wstring& tag)
+    {
+        std::vector<std::wstring> values;
+        const std::wstring open = L"<" + tag + L">";
+        const std::wstring close = L"</" + tag + L">";
+        size_t cursor = 0;
+
+        while (true)
+        {
+            const size_t startTag = xml.find(open, cursor);
+            if (startTag == std::wstring::npos)
+            {
+                break;
+            }
+
+            const size_t valueStart = startTag + open.size();
+            const size_t valueEnd = xml.find(close, valueStart);
+            if (valueEnd == std::wstring::npos)
+            {
+                break;
+            }
+
+            values.push_back(xml.substr(valueStart, valueEnd - valueStart));
+            cursor = valueEnd + close.size();
+        }
+
+        return values;
+    }
+
+    bool ContainsPlatform(const std::vector<std::wstring>& platforms, const std::wstring& wanted)
+    {
+        for (const auto& value : platforms)
+        {
+            if (value == wanted)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     String^ GetNetworkState()
     {
         try
@@ -134,7 +196,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     title->HorizontalAlignment = HorizontalAlignment::Center;
 
     auto subtitle = ref new TextBlock();
-    subtitle->Text = ref new String(L"v0.2.3 - URL validation");
+    subtitle->Text = ref new String(L"v0.3 - Project parser");
     subtitle->FontSize = 22;
     subtitle->Opacity = 0.8;
     subtitle->HorizontalAlignment = HorizontalAlignment::Center;
@@ -174,6 +236,19 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     memoryText->Text = ToPlatformString(L"App memory limit: " + std::to_wstring(memoryLimitMb) + L" MB");
     memoryText->FontSize = 18;
 
+    auto resourcePolicyText = ref new TextBlock();
+    unsigned long long plannedMemoryMb = (memoryLimitMb * 90ULL) / 100ULL;
+    resourcePolicyText->Text = ToPlatformString(
+        L"Compute policy: max runtime resources; CPU workers=" +
+        std::to_wstring(cpuThreads) +
+        L", memory high-water=" +
+        std::to_wstring(plannedMemoryMb) +
+        L" MB"
+    );
+    resourcePolicyText->FontSize = 16;
+    resourcePolicyText->TextWrapping = TextWrapping::Wrap;
+    resourcePolicyText->Opacity = 0.85;
+
     auto networkText = ref new TextBlock();
     std::wstring networkLine = L"Network: ";
     networkLine += GetNetworkState()->Data();
@@ -191,6 +266,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     statusPanel->Children->Append(platformText);
     statusPanel->Children->Append(cpuText);
     statusPanel->Children->Append(memoryText);
+    statusPanel->Children->Append(resourcePolicyText);
     statusPanel->Children->Append(networkText);
     statusPanel->Children->Append(storageText);
     statusBox->Child = statusPanel;
@@ -239,6 +315,21 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     endpointText->Text = ref new String(L"Endpoint: get_project_config.php");
     endpointText->FontSize = 15;
     endpointText->Opacity = 0.65;
+
+    auto summaryTitle = ref new TextBlock();
+    summaryTitle->Text = ref new String(L"Project summary");
+    summaryTitle->FontSize = 24;
+    summaryTitle->Margin = Thickness(0, 18, 0, 0);
+
+    auto summaryBorder = ref new Border();
+    summaryBorder->Padding = Thickness(18);
+    summaryBorder->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255, 32, 42, 51));
+
+    auto summaryText = ref new TextBlock();
+    summaryText->Text = ref new String(L"No project loaded.");
+    summaryText->FontSize = 17;
+    summaryText->TextWrapping = TextWrapping::Wrap;
+    summaryBorder->Child = summaryText;
 
     auto logTitle = ref new TextBlock();
     logTitle->Text = ref new String(L"Log");
@@ -356,7 +447,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     );
 
     testButton->Click += ref new RoutedEventHandler(
-        [urlBox, testButton, logText, appendLog](Object^, RoutedEventArgs^)
+        [urlBox, testButton, logText, summaryText, appendLog](Object^, RoutedEventArgs^)
         {
             std::wstring baseUrl = NormalizeProjectUrl(urlBox->Text);
             if (baseUrl.empty())
@@ -422,7 +513,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                     }
                 )
                 .then(
-                    [appendLog](String^ body)
+                    [appendLog, summaryText](String^ body)
                     {
                         std::wstring xml = body ? body->Data() : L"";
                         bool looksLikeBoinc =
@@ -434,21 +525,50 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         if (looksLikeBoinc)
                         {
                             appendLog(ref new String(L"BOINC project configuration detected."));
+
+                            const std::wstring projectName = ExtractFirstTag(xml, L"name");
+                            const std::wstring masterUrl = ExtractFirstTag(xml, L"master_url");
+                            const std::wstring serverVersion = ExtractFirstTag(xml, L"server_version");
+                            const auto platforms = ExtractAllTags(xml, L"platform_name");
+                            const bool xboxNative = ContainsPlatform(platforms, L"x86_64-pc-xbox-uwp");
+
+                            std::wstring summary;
+                            summary += L"Project: " + (projectName.empty() ? L"(unknown)" : projectName) + L"\n";
+                            summary += L"Master URL: " + (masterUrl.empty() ? L"(not reported)" : masterUrl) + L"\n";
+                            summary += L"Server version: " + (serverVersion.empty() ? L"(not reported)" : serverVersion) + L"\n";
+                            summary += L"Platforms advertised: " + std::to_wstring(platforms.size()) + L"\n";
+                            summary += L"Native Xbox platform: ";
+                            summary += xboxNative ? L"YES" : L"NO";
+                            summary += L"\n";
+                            summary += L"Xbox platform ID: x86_64-pc-xbox-uwp";
+
+                            summaryText->Text = ToPlatformString(summary);
+
+                            try
+                            {
+                                auto values = ApplicationData::Current->LocalSettings->Values;
+                                values->Insert(ref new String(L"ProjectName"), ToPlatformString(projectName));
+                                values->Insert(ref new String(L"MasterUrl"), ToPlatformString(masterUrl));
+                                values->Insert(ref new String(L"ServerVersion"), ToPlatformString(serverVersion));
+                            }
+                            catch (Exception^)
+                            {
+                            }
+
+                            appendLog(ToPlatformString(
+                                L"Parsed project: " +
+                                (projectName.empty() ? L"(unknown)" : projectName) +
+                                L"; platforms=" +
+                                std::to_wstring(platforms.size())
+                            ));
                         }
                         else
                         {
+                            summaryText->Text = ref new String(L"Response is not a recognized BOINC project configuration.");
                             appendLog(ref new String(L"Response received, but BOINC project XML was not recognized."));
                         }
 
-                        if (xml.size() > 3500)
-                        {
-                            xml.resize(3500);
-                            xml += L"\n...[response truncated]";
-                        }
-
-                        appendLog(ref new String(L""));
-                        appendLog(ref new String(L"Server response:"));
-                        appendLog(ToPlatformString(xml));
+                        appendLog(ref new String(L"Project configuration parsed."));
                     },
                     task_continuation_context::use_current()
                 )
@@ -489,6 +609,8 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     panel->Children->Append(testButton);
     panel->Children->Append(diagnosticButton);
     panel->Children->Append(endpointText);
+    panel->Children->Append(summaryTitle);
+    panel->Children->Append(summaryBorder);
     panel->Children->Append(logTitle);
     panel->Children->Append(logBorder);
 
