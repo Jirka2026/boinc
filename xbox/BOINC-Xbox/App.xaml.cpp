@@ -40,7 +40,24 @@ namespace
             url.pop_back();
         }
 
-        if (!url.empty() && url.find(L"://") == std::wstring::npos)
+        // Correct common controller/onscreen-keyboard URL typos.
+        if (url.rfind(L"https//", 0) == 0)
+        {
+            url.replace(0, 7, L"https://");
+        }
+        else if (url.rfind(L"http//", 0) == 0)
+        {
+            url.replace(0, 6, L"http://");
+        }
+        else if (url.rfind(L"https:/", 0) == 0 && url.rfind(L"https://", 0) != 0)
+        {
+            url.replace(0, 7, L"https://");
+        }
+        else if (url.rfind(L"http:/", 0) == 0 && url.rfind(L"http://", 0) != 0)
+        {
+            url.replace(0, 6, L"http://");
+        }
+        else if (!url.empty() && url.find(L"://") == std::wstring::npos)
         {
             url = L"https://" + url;
         }
@@ -117,7 +134,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     title->HorizontalAlignment = HorizontalAlignment::Center;
 
     auto subtitle = ref new TextBlock();
-    subtitle->Text = ref new String(L"v0.2.2 - Direct HTTP transport");
+    subtitle->Text = ref new String(L"v0.2.3 - URL validation");
     subtitle->FontSize = 22;
     subtitle->Opacity = 0.8;
     subtitle->HorizontalAlignment = HorizontalAlignment::Center;
