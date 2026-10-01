@@ -17,6 +17,7 @@ using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
 using namespace Windows::UI::Xaml::Media;
 using namespace Windows::Web::Http;
+using namespace Windows::Web::Http::Filters;
 
 namespace
 {
@@ -116,7 +117,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     title->HorizontalAlignment = HorizontalAlignment::Center;
 
     auto subtitle = ref new TextBlock();
-    subtitle->Text = ref new String(L"v0.2.1 - Network diagnostics");
+    subtitle->Text = ref new String(L"v0.2.2 - Direct HTTP transport");
     subtitle->FontSize = 22;
     subtitle->Opacity = 0.8;
     subtitle->HorizontalAlignment = HorizontalAlignment::Center;
@@ -382,7 +383,11 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             appendLog(ToPlatformString(L"GET " + endpoint));
             testButton->IsEnabled = false;
 
-            auto client = ref new HttpClient();
+            auto filter = ref new HttpBaseProtocolFilter();
+            filter->UseProxy = false;
+
+            auto client = ref new HttpClient(filter);
+            appendLog(ref new String(L"HTTP transport: direct connection (proxy disabled)"));
 
             create_task(client->GetAsync(uri))
                 .then(
