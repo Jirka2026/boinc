@@ -254,7 +254,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         {
             logText->Text = ref new String(L"");
             appendLog(ref new String(L"Network diagnostics"));
-            appendLog(ref new String(L"1) Network profile: ") + GetNetworkState());
+            std::wstring profileLine = L"1) Network profile: ";
+            profileLine += GetNetworkState()->Data();
+            appendLog(ToPlatformString(profileLine));
             diagnosticButton->IsEnabled = false;
 
             auto ipSocket = ref new StreamSocket();
