@@ -7,7 +7,9 @@ using namespace Platform;
 using namespace concurrency;
 using namespace Windows::ApplicationModel::Activation;
 using namespace Windows::Foundation;
+using namespace Windows::Networking;
 using namespace Windows::Networking::Connectivity;
+using namespace Windows::Networking::Sockets;
 using namespace Windows::Storage;
 using namespace Windows::System;
 using namespace Windows::UI;
@@ -102,10 +104,10 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     scroll->VerticalScrollBarVisibility = ScrollBarVisibility::Auto;
 
     auto panel = ref new StackPanel();
-    panel->HorizontalAlignment = HorizontalAlignment::Center;
+    panel->HorizontalAlignment = HorizontalAlignment::Stretch;
     panel->VerticalAlignment = VerticalAlignment::Top;
-    panel->Width = 1040;
-    panel->Margin = Thickness(64);
+    panel->MaxWidth = 960;
+    panel->Margin = Thickness(140, 64, 140, 64);
     panel->Spacing = 14;
 
     auto title = ref new TextBlock();
@@ -114,7 +116,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     title->HorizontalAlignment = HorizontalAlignment::Center;
 
     auto subtitle = ref new TextBlock();
-    subtitle->Text = ref new String(L"v0.2 - Network / Project test");
+    subtitle->Text = ref new String(L"v0.2.1 - Network diagnostics");
     subtitle->FontSize = 22;
     subtitle->Opacity = 0.8;
     subtitle->HorizontalAlignment = HorizontalAlignment::Center;
@@ -209,6 +211,12 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     testButton->Padding = Thickness(24, 12, 24, 12);
     testButton->HorizontalAlignment = HorizontalAlignment::Left;
 
+    auto diagnosticButton = ref new Button();
+    diagnosticButton->Content = ref new String(L"Run network diagnostics");
+    diagnosticButton->FontSize = 18;
+    diagnosticButton->Padding = Thickness(22, 10, 22, 10);
+    diagnosticButton->HorizontalAlignment = HorizontalAlignment::Left;
+
     auto endpointText = ref new TextBlock();
     endpointText->Text = ref new String(L"Endpoint: get_project_config.php");
     endpointText->FontSize = 15;
@@ -240,6 +248,92 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         combined += L"\n";
         logText->Text = ToPlatformString(combined);
     };
+
+    diagnosticButton->Click += ref new RoutedEventHandler(
+        [diagnosticButton, logText, appendLog](Object^, RoutedEventArgs^)
+        {
+            logText->Text = ref new String(L"");
+            appendLog(ref new String(L"Network diagnostics"));
+            appendLog(ref new String(L"1) Network profile: ") + GetNetworkState());
+            diagnosticButton->IsEnabled = false;
+
+            auto ipSocket = ref new StreamSocket();
+            auto ipHost = ref new HostName(ref new String(L"1.1.1.1"));
+
+            appendLog(ref new String(L"2) Direct IP TCP test: 1.1.1.1:443"));
+
+            create_task(ipSocket->ConnectAsync(
+                ipHost,
+                ref new String(L"443"),
+                SocketProtectionLevel::PlainSocket
+            ))
+            .then(
+                [appendLog, diagnosticButton](task<void> ipTask)
+                {
+                    bool ipOk = false;
+                    try
+                    {
+                        ipTask.get();
+                        ipOk = true;
+                        appendLog(ref new String(L"   PASS: outbound TCP by IP works."));
+                    }
+                    catch (Exception^ ex)
+                    {
+                        std::wstring msg = L"   FAIL: direct IP connection failed. HRESULT=0x";
+                        wchar_t hexBuf[16] = {};
+                        swprintf_s(hexBuf, L"%08X", static_cast<unsigned int>(ex->HResult));
+                        msg += hexBuf;
+                        msg += L" ";
+                        msg += ex->Message->Data();
+                        appendLog(ToPlatformString(msg));
+                    }
+
+                    if (!ipOk)
+                    {
+                        appendLog(ref new String(L"Result: outbound internet is blocked or unavailable for this app."));
+                        diagnosticButton->IsEnabled = true;
+                        return task_from_result();
+                    }
+
+                    appendLog(ref new String(L"3) DNS/TCP test: one.one.one.one:443"));
+
+                    auto dnsSocket = ref new StreamSocket();
+                    auto dnsHost = ref new HostName(ref new String(L"one.one.one.one"));
+
+                    return create_task(dnsSocket->ConnectAsync(
+                        dnsHost,
+                        ref new String(L"443"),
+                        SocketProtectionLevel::PlainSocket
+                    )).then(
+                        [appendLog, diagnosticButton](task<void> dnsTask)
+                        {
+                            try
+                            {
+                                dnsTask.get();
+                                appendLog(ref new String(L"   PASS: hostname resolution and outbound TCP work."));
+                                appendLog(ref new String(L"Result: network stack is OK; retry the BOINC project test."));
+                            }
+                            catch (Exception^ ex)
+                            {
+                                std::wstring msg = L"   FAIL: hostname/DNS test failed. HRESULT=0x";
+                                wchar_t hexBuf[16] = {};
+                                swprintf_s(hexBuf, L"%08X", static_cast<unsigned int>(ex->HResult));
+                                msg += hexBuf;
+                                msg += L" ";
+                                msg += ex->Message->Data();
+                                appendLog(ToPlatformString(msg));
+                                appendLog(ref new String(L"Result: direct Internet works, but DNS/name resolution does not."));
+                            }
+
+                            diagnosticButton->IsEnabled = true;
+                        },
+                        task_continuation_context::use_current()
+                    );
+                },
+                task_continuation_context::use_current()
+            );
+        }
+    );
 
     testButton->Click += ref new RoutedEventHandler(
         [urlBox, testButton, logText, appendLog](Object^, RoutedEventArgs^)
@@ -343,7 +437,11 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         }
                         catch (Exception^ ex)
                         {
-                            std::wstring message = L"ERROR: ";
+                            std::wstring message = L"ERROR HRESULT=0x";
+                            wchar_t hexBuf[16] = {};
+                            swprintf_s(hexBuf, L"%08X", static_cast<unsigned int>(ex->HResult));
+                            message += hexBuf;
+                            message += L" ";
                             message += ex->Message->Data();
                             appendLog(ToPlatformString(message));
                         }
@@ -365,6 +463,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     panel->Children->Append(projectTitle);
     panel->Children->Append(urlBox);
     panel->Children->Append(testButton);
+    panel->Children->Append(diagnosticButton);
     panel->Children->Append(endpointText);
     panel->Children->Append(logTitle);
     panel->Children->Append(logBorder);
