@@ -24,6 +24,15 @@ using namespace Windows::Web::Http::Filters;
 
 namespace
 {
+    struct ProjectInfo
+    {
+        std::wstring name;
+        std::wstring masterUrl;
+        std::wstring serverVersion;
+        size_t platformCount = 0;
+        bool xboxNative = false;
+    };
+
     struct IntegrationState
     {
         std::wstring project = L"PENDING";
@@ -53,7 +62,12 @@ namespace
 
     std::wstring Lowercase(std::wstring value)
     {
-        std::transform(value.begin(), value.end(), value.begin(), towlower);
+        std::transform(
+            value.begin(),
+            value.end(),
+            value.begin(),
+            [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); }
+        );
         return value;
     }
 
@@ -208,7 +222,7 @@ namespace
                 const size_t end = tag.find(L'\"', start);
                 if (end != std::wstring::npos)
                 {
-                    PushUnique(urls, tag.substr(start, end - start));
+                    PushUnique(urls, Trim(tag.substr(start, end - start)));
                 }
             }
 
@@ -221,6 +235,52 @@ namespace
     bool ContainsPlatform(const std::vector<std::wstring>& platforms, const std::wstring& wanted)
     {
         return std::find(platforms.begin(), platforms.end(), wanted) != platforms.end();
+    }
+
+    bool ParseProjectConfig(
+        const std::wstring& xml,
+        const std::wstring& fallbackUrl,
+        ProjectInfo& info
+    )
+    {
+        if (xml.find(L"<project_config") == std::wstring::npos &&
+            xml.find(L"<project>") == std::wstring::npos)
+        {
+            return false;
+        }
+
+        info.name = ExtractFirstTag(xml, L"name");
+        info.masterUrl = ExtractFirstTag(xml, L"master_url");
+        if (info.masterUrl.empty()) info.masterUrl = fallbackUrl;
+        info.masterUrl = NormalizeUrlString(info.masterUrl);
+        info.serverVersion = ExtractFirstTag(xml, L"server_version");
+
+        const auto platforms = ExtractAllTags(xml, L"platform_name");
+        info.platformCount = platforms.size();
+        info.xboxNative = ContainsPlatform(platforms, L"x86_64-pc-xbox-uwp");
+        return true;
+    }
+
+    std::wstring ProjectSummary(const ProjectInfo& info)
+    {
+        std::wstring summary;
+        summary += L"Project: " + (info.name.empty() ? L"(unknown)" : info.name) + L"\n";
+        summary += L"Master URL: " + info.masterUrl + L"/\n";
+        summary += L"Server version: " + (info.serverVersion.empty() ? L"(not reported)" : info.serverVersion) + L"\n";
+        summary += L"Platforms advertised: " + std::to_wstring(info.platformCount) + L"\n";
+        summary += L"Native Xbox platform: ";
+        summary += info.xboxNative ? L"YES" : L"NO";
+        summary += L"\nXbox platform ID: x86_64-pc-xbox-uwp";
+        return summary;
+    }
+
+    void PersistProjectInfo(const std::wstring& projectUrl, const ProjectInfo& info)
+    {
+        auto values = ApplicationData::Current->LocalSettings->Values;
+        values->Insert(ref new String(L"ProjectUrl"), ToPlatformString(projectUrl));
+        values->Insert(ref new String(L"ProjectName"), ToPlatformString(info.name));
+        values->Insert(ref new String(L"MasterUrl"), ToPlatformString(info.masterUrl));
+        values->Insert(ref new String(L"ServerVersion"), ToPlatformString(info.serverVersion));
     }
 
     String^ GetNetworkState()
@@ -242,11 +302,20 @@ namespace
         return ref new String(L"Offline");
     }
 
-    task<String^> HttpGetText(HttpClient^ client, const std::wstring& url)
+    HttpClient^ CreateDirectHttpClient()
     {
+        auto filter = ref new HttpBaseProtocolFilter();
+        filter->UseProxy = false;
+        return ref new HttpClient(filter);
+    }
+
+    task<String^> HttpGetText(const std::wstring& url)
+    {
+        auto client = CreateDirectHttpClient();
         auto uri = ref new Uri(ToPlatformString(url));
+
         return create_task(client->GetAsync(uri)).then(
-            [](HttpResponseMessage^ response) -> task<String^>
+            [client](HttpResponseMessage^ response) -> task<String^>
             {
                 if (!response->IsSuccessStatusCode)
                 {
@@ -327,7 +396,9 @@ namespace
         {
             workers.emplace_back([i, iterations, &sums]()
             {
-                unsigned long long x = 0x9E3779B97F4A7C15ULL ^ (static_cast<unsigned long long>(i) + 1ULL);
+                unsigned long long x = 0x9E3779B97F4A7C15ULL ^
+                    (static_cast<unsigned long long>(i) + 1ULL);
+
                 for (unsigned int n = 0; n < iterations; ++n)
                 {
                     x ^= x << 13;
@@ -335,6 +406,7 @@ namespace
                     x ^= x << 17;
                     x += static_cast<unsigned long long>(n) * 0x5851F42D4C957F2DULL;
                 }
+
                 sums[i] = x;
             });
         }
@@ -345,14 +417,20 @@ namespace
         for (auto value : sums) checksum ^= value;
 
         const auto end = std::chrono::steady_clock::now();
-        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end - start
+        ).count();
 
         return L"PASS: workers=" + std::to_wstring(threadCount) +
             L", time=" + std::to_wstring(elapsedMs) +
             L" ms, checksum=" + std::to_wstring(checksum & 0xFFFFULL);
     }
 
-    bool StoreAuthenticator(const std::wstring& projectUrl, const std::wstring& email, const std::wstring& authenticator)
+    bool StoreAuthenticator(
+        const std::wstring& projectUrl,
+        const std::wstring& email,
+        const std::wstring& authenticator
+    )
     {
         try
         {
@@ -376,7 +454,9 @@ namespace
                 ToPlatformString(email),
                 ToPlatformString(authenticator)
             ));
-            return true;
+
+            auto stored = vault->FindAllByResource(resource);
+            return stored != nullptr && stored->Size > 0;
         }
         catch (Exception^)
         {
@@ -394,13 +474,15 @@ namespace
     {
         std::wstring report = L"v0.4 integration report\n\n";
         report += L"Project: " + FinalizeStatus(state->project, L"FAIL / not completed") + L"\n";
-        report += L"Scheduler discovery: " + FinalizeStatus(state->schedulerDiscovery, L"FAIL / not completed") + L"\n";
-        report += L"Scheduler TCP: " + FinalizeStatus(state->schedulerPreflight, L"FAIL / not completed") + L"\n";
+        report += L"Scheduler discovery: " +
+            FinalizeStatus(state->schedulerDiscovery, L"FAIL / not completed") + L"\n";
+        report += L"Scheduler TCP: " +
+            FinalizeStatus(state->schedulerPreflight, L"FAIL / not completed") + L"\n";
         report += L"Account: " + FinalizeStatus(state->account, L"FAIL / not completed") + L"\n";
         report += L"CPU: " + FinalizeStatus(state->cpu, L"FAIL / not completed") + L"\n";
         report += L"Memory: " + FinalizeStatus(state->memory, L"FAIL / not completed") + L"\n";
         report += L"Storage: " + FinalizeStatus(state->storage, L"FAIL / not completed") + L"\n";
-        report += L"Password persistence: PASS - password is never stored";
+        report += L"Password persistence: PASS - plaintext password is never stored";
         return report;
     }
 }
@@ -468,11 +550,15 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     platformText->FontSize = 18;
 
     auto cpuText = ref new TextBlock();
-    cpuText->Text = ToPlatformString(L"CPU threads visible to app: " + std::to_wstring(cpuThreads));
+    cpuText->Text = ToPlatformString(
+        L"CPU threads visible to app: " + std::to_wstring(cpuThreads)
+    );
     cpuText->FontSize = 18;
 
     auto memoryText = ref new TextBlock();
-    memoryText->Text = ToPlatformString(L"App memory limit: " + std::to_wstring(memoryLimitMb) + L" MB");
+    memoryText->Text = ToPlatformString(
+        L"App memory limit: " + std::to_wstring(memoryLimitMb) + L" MB"
+    );
     memoryText->FontSize = 18;
 
     auto resourcePolicyText = ref new TextBlock();
@@ -560,7 +646,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
 
     auto integrationHint = ref new TextBlock();
     integrationHint->Text = ref new String(
-        L"Tests project config, scheduler discovery, scheduler TCP, account login, all visible CPU workers, memory policy and persistence in one run."
+        L"One run tests project config, scheduler discovery, scheduler TCP, account login, all visible CPU workers, memory policy and persistence."
     );
     integrationHint->TextWrapping = TextWrapping::Wrap;
     integrationHint->Opacity = 0.75;
@@ -663,44 +749,21 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             appendLog(ref new String(L"Testing BOINC project..."));
             testButton->IsEnabled = false;
 
-            auto filter = ref new HttpBaseProtocolFilter();
-            filter->UseProxy = false;
-            auto client = ref new HttpClient(filter);
-
-            HttpGetText(client, baseUrl + L"/get_project_config.php")
+            HttpGetText(baseUrl + L"/get_project_config.php")
                 .then(
                     [baseUrl, summaryText, appendLog](String^ body)
                     {
+                        ProjectInfo info;
                         const std::wstring xml = body ? body->Data() : L"";
-                        if (xml.find(L"<project_config") == std::wstring::npos &&
-                            xml.find(L"<project>") == std::wstring::npos)
+                        if (!ParseProjectConfig(xml, baseUrl, info))
                         {
-                            throw ref new FailureException(ref new String(L"BOINC project XML not recognized"));
+                            throw ref new FailureException(
+                                ref new String(L"BOINC project XML not recognized")
+                            );
                         }
 
-                        const std::wstring projectName = ExtractFirstTag(xml, L"name");
-                        std::wstring masterUrl = ExtractFirstTag(xml, L"master_url");
-                        if (masterUrl.empty()) masterUrl = baseUrl;
-                        const std::wstring serverVersion = ExtractFirstTag(xml, L"server_version");
-                        const auto platforms = ExtractAllTags(xml, L"platform_name");
-                        const bool xboxNative = ContainsPlatform(platforms, L"x86_64-pc-xbox-uwp");
-
-                        std::wstring summary;
-                        summary += L"Project: " + (projectName.empty() ? L"(unknown)" : projectName) + L"\n";
-                        summary += L"Master URL: " + masterUrl + L"\n";
-                        summary += L"Server version: " + (serverVersion.empty() ? L"(not reported)" : serverVersion) + L"\n";
-                        summary += L"Platforms advertised: " + std::to_wstring(platforms.size()) + L"\n";
-                        summary += L"Native Xbox platform: ";
-                        summary += xboxNative ? L"YES" : L"NO";
-                        summary += L"\nXbox platform ID: x86_64-pc-xbox-uwp";
-                        summaryText->Text = ToPlatformString(summary);
-
-                        auto values = ApplicationData::Current->LocalSettings->Values;
-                        values->Insert(ref new String(L"ProjectUrl"), ToPlatformString(baseUrl));
-                        values->Insert(ref new String(L"ProjectName"), ToPlatformString(projectName));
-                        values->Insert(ref new String(L"MasterUrl"), ToPlatformString(masterUrl));
-                        values->Insert(ref new String(L"ServerVersion"), ToPlatformString(serverVersion));
-
+                        summaryText->Text = ToPlatformString(ProjectSummary(info));
+                        PersistProjectInfo(baseUrl, info);
                         appendLog(ref new String(L"PASS: Project configuration parsed."));
                     },
                     task_continuation_context::use_current()
@@ -735,10 +798,15 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                 return;
             }
 
-            const std::wstring email = Lowercase(Trim(emailBox->Text ? emailBox->Text->Data() : L""));
-            std::wstring password = passwordBox->Password ? passwordBox->Password->Data() : L"";
-            std::wstring passwdHash;
+            const std::wstring email = Lowercase(
+                Trim(emailBox->Text ? emailBox->Text->Data() : L"")
+            );
 
+            std::wstring password = passwordBox->Password
+                ? passwordBox->Password->Data()
+                : L"";
+
+            std::wstring passwdHash;
             if (!email.empty() && !password.empty())
             {
                 passwdHash = Md5Hex(password + email);
@@ -757,7 +825,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             logText->Text = ref new String(L"");
             reportText->Text = ref new String(L"Integration test running...");
             appendLog(ref new String(L"Starting v0.4 integration suite..."));
-            appendLog(ref new String(L"Password is hashed in memory and then cleared; plaintext is never stored."));
+            appendLog(ref new String(
+                L"Plaintext password is hashed immediately, cleared from the UI and never persisted."
+            ));
 
             try
             {
@@ -766,7 +836,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                 auto probeValue = ref new String(L"v0.4-ok");
                 values->Insert(probeKey, probeValue);
                 auto restored = dynamic_cast<String^>(values->Lookup(probeKey));
-                state->storage = restored != nullptr && std::wstring(restored->Data()) == L"v0.4-ok"
+
+                state->storage =
+                    restored != nullptr && std::wstring(restored->Data()) == L"v0.4-ok"
                     ? L"PASS: write/read persistence OK"
                     : L"FAIL: persistence mismatch";
             }
@@ -788,54 +860,32 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                 }
             });
 
-            auto filter = ref new HttpBaseProtocolFilter();
-            filter->UseProxy = false;
-            auto client = ref new HttpClient(filter);
-
-            HttpGetText(client, baseUrl + L"/get_project_config.php")
+            auto networkTask = HttpGetText(baseUrl + L"/get_project_config.php")
                 .then(
                     [state, baseUrl, summaryText, appendLog](String^ body) -> task<String^>
                     {
+                        ProjectInfo info;
                         const std::wstring xml = body ? body->Data() : L"";
-                        if (xml.find(L"<project_config") == std::wstring::npos &&
-                            xml.find(L"<project>") == std::wstring::npos)
+                        if (!ParseProjectConfig(xml, baseUrl, info))
                         {
                             state->project = L"FAIL: BOINC XML not recognized";
-                            throw ref new FailureException(ref new String(L"BOINC project XML not recognized"));
+                            throw ref new FailureException(
+                                ref new String(L"BOINC project XML not recognized")
+                            );
                         }
 
-                        state->projectName = ExtractFirstTag(xml, L"name");
-                        state->masterUrl = ExtractFirstTag(xml, L"master_url");
-                        if (state->masterUrl.empty()) state->masterUrl = baseUrl;
-                        state->masterUrl = NormalizeUrlString(state->masterUrl);
-
-                        const std::wstring serverVersion = ExtractFirstTag(xml, L"server_version");
-                        const auto platforms = ExtractAllTags(xml, L"platform_name");
-                        const bool xboxNative = ContainsPlatform(platforms, L"x86_64-pc-xbox-uwp");
-
+                        state->projectName = info.name;
+                        state->masterUrl = info.masterUrl;
                         state->project = L"PASS: " +
-                            (state->projectName.empty() ? L"unknown project" : state->projectName) +
-                            L", platforms=" + std::to_wstring(platforms.size());
+                            (info.name.empty() ? L"unknown project" : info.name) +
+                            L", platforms=" + std::to_wstring(info.platformCount);
 
-                        std::wstring summary;
-                        summary += L"Project: " + (state->projectName.empty() ? L"(unknown)" : state->projectName) + L"\n";
-                        summary += L"Master URL: " + state->masterUrl + L"/\n";
-                        summary += L"Server version: " + (serverVersion.empty() ? L"(not reported)" : serverVersion) + L"\n";
-                        summary += L"Platforms advertised: " + std::to_wstring(platforms.size()) + L"\n";
-                        summary += L"Native Xbox platform: ";
-                        summary += xboxNative ? L"YES" : L"NO";
-                        summary += L"\nXbox platform ID: x86_64-pc-xbox-uwp";
-                        summaryText->Text = ToPlatformString(summary);
-
-                        auto values = ApplicationData::Current->LocalSettings->Values;
-                        values->Insert(ref new String(L"ProjectUrl"), ToPlatformString(baseUrl));
-                        values->Insert(ref new String(L"ProjectName"), ToPlatformString(state->projectName));
-                        values->Insert(ref new String(L"MasterUrl"), ToPlatformString(state->masterUrl));
-                        values->Insert(ref new String(L"ServerVersion"), ToPlatformString(serverVersion));
-
+                        summaryText->Text = ToPlatformString(ProjectSummary(info));
+                        PersistProjectInfo(baseUrl, info);
                         appendLog(ref new String(L"PASS: Project configuration"));
+
                         state->schedulerDiscovery = L"RUNNING";
-                        return HttpGetText(ref new HttpClient(ref new HttpBaseProtocolFilter()), state->masterUrl + L"/");
+                        return HttpGetText(state->masterUrl + L"/");
                     },
                     task_continuation_context::use_current()
                 )
@@ -847,12 +897,16 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         if (schedulers.empty())
                         {
                             state->schedulerDiscovery = L"FAIL: no scheduler URL found";
-                            throw ref new FailureException(ref new String(L"No scheduler URL found in master page"));
+                            throw ref new FailureException(
+                                ref new String(L"No scheduler URL found in master page")
+                            );
                         }
 
                         state->schedulerUrl = schedulers.front();
                         state->schedulerDiscovery = L"PASS: " + state->schedulerUrl;
-                        appendLog(ToPlatformString(L"PASS: Scheduler discovered: " + state->schedulerUrl));
+                        appendLog(ToPlatformString(
+                            L"PASS: Scheduler discovered: " + state->schedulerUrl
+                        ));
 
                         try
                         {
@@ -871,15 +925,19 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                     task_continuation_context::use_current()
                 )
                 .then(
-                    [state, client, email, passwdHash, appendLog](std::wstring schedulerResult) -> task<String^>
+                    [state, email, passwdHash, appendLog](std::wstring schedulerResult) -> task<String^>
                     {
                         state->schedulerPreflight = schedulerResult;
-                        appendLog(ToPlatformString(L"PASS: Scheduler TCP preflight: " + schedulerResult));
+                        appendLog(ToPlatformString(
+                            L"PASS: Scheduler TCP preflight: " + schedulerResult
+                        ));
 
                         if (email.empty() || passwdHash.empty())
                         {
                             state->account = L"SKIP: enter email and password to test account";
-                            appendLog(ref new String(L"SKIP: Account login - credentials not entered."));
+                            appendLog(ref new String(
+                                L"SKIP: Account login - email/password not entered."
+                            ));
                             return task_from_result(ref new String(L""));
                         }
 
@@ -890,7 +948,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                             L"&passwd_hash=" + UrlEncode(passwdHash);
 
                         appendLog(ref new String(L"Testing BOINC account lookup..."));
-                        return HttpGetText(client, lookupUrl);
+                        return HttpGetText(lookupUrl);
                     },
                     task_continuation_context::use_current()
                 )
@@ -903,20 +961,30 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         }
 
                         const std::wstring xml = accountBody->Data();
-                        const std::wstring authenticator = ExtractFirstTag(xml, L"authenticator");
+                        const std::wstring authenticator = ExtractFirstTag(
+                            xml,
+                            L"authenticator"
+                        );
+
                         if (authenticator.empty())
                         {
                             std::wstring errorMsg = ExtractFirstTag(xml, L"error_msg");
                             if (errorMsg.empty()) errorMsg = ExtractFirstTag(xml, L"error_num");
                             if (errorMsg.empty()) errorMsg = L"authenticator missing";
+
                             state->account = L"FAIL: " + errorMsg;
-                            throw ref new FailureException(ToPlatformString(L"Account lookup failed: " + errorMsg));
+                            throw ref new FailureException(
+                                ToPlatformString(L"Account lookup failed: " + errorMsg)
+                            );
                         }
 
                         if (!StoreAuthenticator(state->masterUrl, email, authenticator))
                         {
-                            state->account = L"FAIL: authenticator received but secure storage failed";
-                            throw ref new FailureException(ref new String(L"PasswordVault storage failed"));
+                            state->account =
+                                L"FAIL: authenticator received but PasswordVault storage failed";
+                            throw ref new FailureException(
+                                ref new String(L"PasswordVault storage failed")
+                            );
                         }
 
                         try
@@ -931,40 +999,55 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                         }
 
                         state->account = L"PASS: authenticator stored securely";
-                        appendLog(ref new String(L"PASS: Account connected; authenticator stored in PasswordVault."));
-                    },
-                    task_continuation_context::use_current()
-                )
-                .then(
-                    [cpuTask]() mutable
-                    {
-                        return cpuTask;
-                    }
-                )
-                .then(
-                    [state, integrationButton, reportText, appendLog](task<void> finalTask)
-                    {
-                        try
-                        {
-                            finalTask.get();
-                            appendLog(ref new String(L"Integration suite completed."));
-                        }
-                        catch (Exception^ ex)
-                        {
-                            std::wstring msg = L"Integration suite stopped: ";
-                            msg += ex->Message->Data();
-                            appendLog(ToPlatformString(msg));
-                        }
-                        catch (...)
-                        {
-                            appendLog(ref new String(L"Integration suite stopped by an unknown error."));
-                        }
-
-                        reportText->Text = ToPlatformString(BuildIntegrationReport(state));
-                        integrationButton->IsEnabled = true;
+                        appendLog(ref new String(
+                            L"PASS: Account connected; authenticator stored in PasswordVault."
+                        ));
                     },
                     task_continuation_context::use_current()
                 );
+
+            networkTask.then(
+                [cpuTask, appendLog](task<void> completedNetworkTask) mutable -> task<void>
+                {
+                    try
+                    {
+                        completedNetworkTask.get();
+                        appendLog(ref new String(L"Network/account part completed."));
+                    }
+                    catch (Exception^ ex)
+                    {
+                        std::wstring msg = L"Network/account part stopped: ";
+                        msg += ex->Message->Data();
+                        appendLog(ToPlatformString(msg));
+                    }
+                    catch (...)
+                    {
+                        appendLog(ref new String(
+                            L"Network/account part stopped by an unknown error."
+                        ));
+                    }
+
+                    return cpuTask;
+                },
+                task_continuation_context::use_current()
+            ).then(
+                [state, integrationButton, reportText, appendLog](task<void> completedCpuTask)
+                {
+                    try
+                    {
+                        completedCpuTask.get();
+                    }
+                    catch (...)
+                    {
+                        state->cpu = L"FAIL: CPU task exception";
+                    }
+
+                    appendLog(ref new String(L"Integration suite completed."));
+                    reportText->Text = ToPlatformString(BuildIntegrationReport(state));
+                    integrationButton->IsEnabled = true;
+                },
+                task_continuation_context::use_current()
+            );
         }
     );
 
@@ -973,6 +1056,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         {
             logText->Text = ref new String(L"");
             appendLog(ref new String(L"Network diagnostics"));
+
             std::wstring profileLine = L"1) Network profile: ";
             profileLine += GetNetworkState()->Data();
             appendLog(ToPlatformString(profileLine));
@@ -981,52 +1065,56 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             auto ipSocket = ref new StreamSocket();
             auto ipHost = ref new HostName(ref new String(L"1.1.1.1"));
 
-            create_task(ipSocket->ConnectAsync(ipHost, ref new String(L"443"), SocketProtectionLevel::PlainSocket))
-                .then(
-                    [appendLog, diagnosticButton](task<void> ipTask)
+            create_task(ipSocket->ConnectAsync(
+                ipHost,
+                ref new String(L"443"),
+                SocketProtectionLevel::PlainSocket
+            )).then(
+                [appendLog, diagnosticButton](task<void> ipTask)
+                {
+                    try
                     {
-                        try
-                        {
-                            ipTask.get();
-                            appendLog(ref new String(L"2) Direct IP TCP: PASS"));
-                        }
-                        catch (Exception^ ex)
-                        {
-                            std::wstring msg = L"2) Direct IP TCP: FAIL - ";
-                            msg += ex->Message->Data();
-                            appendLog(ToPlatformString(msg));
-                            diagnosticButton->IsEnabled = true;
-                            return task_from_result();
-                        }
+                        ipTask.get();
+                        appendLog(ref new String(L"2) Direct IP TCP: PASS"));
+                    }
+                    catch (Exception^ ex)
+                    {
+                        std::wstring msg = L"2) Direct IP TCP: FAIL - ";
+                        msg += ex->Message->Data();
+                        appendLog(ToPlatformString(msg));
+                        diagnosticButton->IsEnabled = true;
+                        return task_from_result();
+                    }
 
-                        auto dnsSocket = ref new StreamSocket();
-                        auto dnsHost = ref new HostName(ref new String(L"one.one.one.one"));
-                        return create_task(dnsSocket->ConnectAsync(
-                            dnsHost,
-                            ref new String(L"443"),
-                            SocketProtectionLevel::PlainSocket
-                        )).then(
-                            [dnsSocket, appendLog, diagnosticButton](task<void> dnsTask)
+                    auto dnsSocket = ref new StreamSocket();
+                    auto dnsHost = ref new HostName(ref new String(L"one.one.one.one"));
+                    return create_task(dnsSocket->ConnectAsync(
+                        dnsHost,
+                        ref new String(L"443"),
+                        SocketProtectionLevel::PlainSocket
+                    )).then(
+                        [dnsSocket, appendLog, diagnosticButton](task<void> dnsTask)
+                        {
+                            try
                             {
-                                try
-                                {
-                                    dnsTask.get();
-                                    appendLog(ref new String(L"3) DNS/TCP: PASS"));
-                                    appendLog(ref new String(L"Result: network stack OK."));
-                                }
-                                catch (Exception^ ex)
-                                {
-                                    std::wstring msg = L"3) DNS/TCP: FAIL - ";
-                                    msg += ex->Message->Data();
-                                    appendLog(ToPlatformString(msg));
-                                }
-                                diagnosticButton->IsEnabled = true;
-                            },
-                            task_continuation_context::use_current()
-                        );
-                    },
-                    task_continuation_context::use_current()
-                );
+                                dnsTask.get();
+                                appendLog(ref new String(L"3) DNS/TCP: PASS"));
+                                appendLog(ref new String(L"Result: network stack OK."));
+                            }
+                            catch (Exception^ ex)
+                            {
+                                std::wstring msg = L"3) DNS/TCP: FAIL - ";
+                                msg += ex->Message->Data();
+                                appendLog(ToPlatformString(msg));
+                            }
+
+                            diagnosticButton->IsEnabled = true;
+                        },
+                        task_continuation_context::use_current()
+                    );
+                },
+                task_continuation_context::use_current()
+            );
         }
     );
 
