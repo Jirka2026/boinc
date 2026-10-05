@@ -13,14 +13,21 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="App.xaml.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="MainPage.xaml.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="AppV08.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="PeriodSearchXbox.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="App.xaml.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="MainPage.xaml.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchXbox.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\boinc_win.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\str_util.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\util.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\filesys.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\boinc_api.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\mfile.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PeriodSearchShim\graphics2.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="..\..\client\xbox\xbox_platform.h"><Filter>Header Files</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
