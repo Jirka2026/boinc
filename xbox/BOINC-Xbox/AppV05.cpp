@@ -431,11 +431,13 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         s->memory = L"PASS: limit=" + std::to_wstring(mem / 1048576ULL) + L" MB, high-water=" + std::to_wstring((mem / 1048576ULL) * 90 / 100) + L" MB";
         s->gpu = GpuTest(); append(L"GPU: " + s->gpu);
 
+        auto uiContext = task_continuation_context::use_current();
+
         create_task([=]() { return CpuTest(cpus); }).then([=](std::wstring cpuResult)
         {
             s->cpu = cpuResult; append(L"CPU: " + cpuResult);
             return GetText(projectUrl + L"/get_project_config.php");
-        }).then([=](String^ body)
+        }, uiContext).then([=](String^ body)
         {
             std::wstring xml = body ? body->Data() : L"";
             if (xml.find(L"<project_config") == std::wstring::npos) throw ref new FailureException(ref new String(L"Not a BOINC project config"));
@@ -445,13 +447,13 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             {
                 return create_task(FileIO::WriteTextAsync(f, body)).then([=]() { s->download = L"PASS: v05_download_test.xml cached"; return GetText(s->masterUrl + L"/"); });
             });
-        }).then([=](String^ master)
+        }, uiContext).then([=](String^ master)
         {
             auto u = SchedulerUrls(master ? master->Data() : L"");
             if (u.empty()) throw ref new FailureException(ref new String(L"No scheduler URL found"));
             s->schedulerUrl = u.front(); s->schedulerDiscovery = L"PASS: " + s->schedulerUrl; append(L"Scheduler: " + s->schedulerUrl);
             return TcpTest(s->schedulerUrl);
-        }).then([=](std::wstring tcp)
+        }, uiContext).then([=](std::wstring tcp)
         {
             s->schedulerTcp = tcp;
             if (!s->email.empty() && !password.empty())
@@ -468,20 +470,20 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             std::wstring em, a; if (LoadAuth(projectUrl, em, a)) { s->email = em; s->authenticator = a; s->account = L"PASS: stored authenticator loaded"; }
             else s->account = L"SKIP: enter project account email/password";
             return task_from_result();
-        }).then([=]()
+        }, uiContext).then([=]()
         {
             if (s->authenticator.empty()) { s->schedulerRpc = L"SKIP: no authenticator"; s->host = L"SKIP"; s->work = L"SKIP"; return task_from_result(); }
             std::wstring req = BuildRequest(s, cpus, mem);
             append(L"Posting real scheduler RPC...");
             return PostXml(s->schedulerUrl, req).then([=](String^ b) { ParseScheduler(b ? b->Data() : L"", s); });
-        }).then([=](task<void> t)
+        }, uiContext).then([=](task<void> t)
         {
             try { t.get(); }
             catch (Exception^ ex) { append(L"Pipeline error: " + std::wstring(ex->Message->Data())); if (s->project == L"PENDING") s->project = L"FAIL"; }
             catch (...) { append(L"Pipeline error: unknown"); }
             try { SetSetting(L"V05Persistence", L"OK"); s->storage = GetSetting(L"V05Persistence") == L"OK" ? L"PASS: local persistence OK" : L"FAIL"; } catch (...) { s->storage = L"FAIL"; }
             report->Text = PS(Report(s)); run->IsEnabled = true; append(L"v0.5 integration finished");
-        }, task_continuation_context::use_current());
+        }, uiContext);
     });
 
     panel->Children->Append(title); panel->Children->Append(sub); panel->Children->Append(status); panel->Children->Append(url); panel->Children->Append(email); panel->Children->Append(pass); panel->Children->Append(run); panel->Children->Append(hint); panel->Children->Append(reportTitle); panel->Children->Append(box(report, ColorHelper::FromArgb(255, 32, 42, 51))); panel->Children->Append(logTitle); panel->Children->Append(box(log, ColorHelper::FromArgb(255, 24, 31, 38)));
