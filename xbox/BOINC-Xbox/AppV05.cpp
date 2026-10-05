@@ -402,7 +402,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     auto sub = ref new TextBlock(); sub->Text = ref new String(L"v0.5 - Scheduler + CPU/GPU integration"); sub->FontSize = 22; sub->HorizontalAlignment = HorizontalAlignment::Center;
     auto status = ref new TextBlock(); status->Text = PS(L"Runtime: CPU threads=" + std::to_wstring(cpus) + L", memory limit=" + std::to_wstring(mem / 1048576ULL) + L" MB"); status->FontSize = 17;
 
-    auto url = ref new TextBox(); url->Header = ref new String(L"Project URL"); url->Text = PS(GetSetting(L"ProjectUrl")); url->PlaceholderText = ref new String(L"https://asteroidsathome.net/boinc/"); url->FontSize = 19;
+    std::wstring initialProjectUrl = GetSetting(L"ProjectUrl");
+    if (initialProjectUrl.empty()) initialProjectUrl = L"https://asteroidsathome.net/boinc/";
+    auto url = ref new TextBox(); url->Header = ref new String(L"Project URL"); url->Text = PS(initialProjectUrl); url->PlaceholderText = ref new String(L"https://asteroidsathome.net/boinc/"); url->FontSize = 19;
     auto email = ref new TextBox(); email->Header = ref new String(L"Email (optional if authenticator is already stored)"); email->Text = PS(GetSetting(L"AccountEmail")); email->FontSize = 19;
     auto pass = ref new PasswordBox(); pass->Header = ref new String(L"Password (never stored)"); pass->FontSize = 19;
     auto run = ref new Button(); run->Content = ref new String(L"Run v0.5 full integration test"); run->FontSize = 20; run->Padding = Thickness(24, 12, 24, 12);
