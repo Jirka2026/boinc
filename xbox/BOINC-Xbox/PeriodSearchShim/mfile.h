@@ -12,23 +12,29 @@ public:
     MFILE() : file_(nullptr) {}
     ~MFILE()
     {
-        if (file_)
-        {
-            fclose(file_);
-            file_ = nullptr;
-        }
+        close();
     }
 
     int open(const char* path, const char* mode)
     {
-        if (file_)
-        {
-            fclose(file_);
-            file_ = nullptr;
-        }
+        close();
 
         file_ = periodsearch_open_file(path, mode);
         return file_ ? 0 : (errno ? errno : 1);
+    }
+
+    int close()
+    {
+        if (!file_) return 0;
+
+        int result = fflush(file_);
+        if (fclose(file_) != 0 && result == 0)
+        {
+            result = errno ? errno : 1;
+        }
+
+        file_ = nullptr;
+        return result;
     }
 
     int flush()
