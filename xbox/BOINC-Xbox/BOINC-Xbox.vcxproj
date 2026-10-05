@@ -98,7 +98,7 @@
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="AppV05.cpp">
+    <ClCompile Include="AppV06.cpp">
       <DependentUpon>App.xaml</DependentUpon>
     </ClCompile>
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp">
@@ -112,6 +112,15 @@
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="..\..\client\xbox\xbox_platform.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FxCompile Include="ComputeBench.hlsl">
+      <EntryPointName>main</EntryPointName>
+      <ShaderType>Compute</ShaderType>
+      <ShaderModel>5.0</ShaderModel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+    </FxCompile>
   </ItemGroup>
 
   <ItemGroup>
