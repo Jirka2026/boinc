@@ -1,0 +1,3 @@
+[submodule "xbox/third_party/PeriodSearch"]
+    path = xbox/third_party/PeriodSearch
+    url = https://github.com/AsteroidsAtHome/PeriodSearch.git
