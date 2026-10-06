@@ -608,7 +608,7 @@ namespace BOINC_Xbox
         url->FontSize = 18;
         auto email = ref new TextBox();
         email->Header = ref new String(L"Email (only needed once if authenticator is not stored)");
-        email->Text = PS(GetSetting(L"AccountEmail"));
+        email->Text = PS(GetSetting(L"AccountEmail").empty() ? L"jirkasalek@yahoo.com" : GetSetting(L"AccountEmail"));
         email->FontSize = 18;
         auto pass = ref new PasswordBox();
         pass->Header = ref new String(L"Password (never stored)");
