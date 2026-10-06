@@ -4,6 +4,7 @@
 #define NOMINMAX
 #endif
 
+#include <windows.h>
 #include <collection.h>
 #include <ppltasks.h>
 #include <string>
