@@ -8,7 +8,7 @@
   <Identity
     Name="Jirka2026.BOINCXbox.Dev"
     Publisher="CN=Jirka2026"
-    Version="1.0.1.0" />
+    Version="1.0.2.0" />
 
   <mp:PhoneIdentity PhoneProductId="8e0a1ed4-4559-460b-958a-f2adc4d458f2" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
 
