@@ -71,6 +71,7 @@ namespace
         std::wstring md5;
         std::wstring response;
         std::wstring error;
+        bool certificate_present = false;
     };
 
     struct CycleState
@@ -485,8 +486,23 @@ namespace
 
     const FileRecord* FindFile(const WorkPackage& p, const std::wstring& name)
     {
-        for (const auto& f : p.files) if (f.name == name) return &f;
-        return nullptr;
+        const FileRecord* best = nullptr;
+        int best_score = -1;
+        for (const auto& f : p.files)
+        {
+            if (f.name != name) continue;
+            int score = 0;
+            if (!f.upload_url.empty()) score += 8;
+            if (!f.xml_signature.empty()) score += 4;
+            if (f.max_nbytes > 0) score += 2;
+            if (!f.download_url.empty()) score += 1;
+            if (!best || score > best_score)
+            {
+                best = &f;
+                best_score = score;
+            }
+        }
+        return best;
     }
 
     WorkPackage ParseWorkPackage(const std::wstring& xml, const std::wstring& project_url)
@@ -508,6 +524,21 @@ namespace
         p.outputs = ParseFileRefs(result);
         p.valid = !p.workunit_name.empty() && !p.result_name.empty() && !p.inputs.empty() && !p.outputs.empty();
         return p;
+    }
+
+    task<String^> LoadCachedWorkXml(const std::wstring& project_url)
+    {
+        return ReadLocalTextIfExists(L"v09_active_work.xml").then([project_url](String^ active) -> task<String^>
+        {
+            const std::wstring a = active ? active->Data() : L"";
+            if (ParseWorkPackage(a, project_url).valid) return task_from_result<String^>(active);
+            return ReadLocalTextIfExists(L"v09_scheduler_work.xml");
+        }).then([project_url](String^ current) -> task<String^>
+        {
+            const std::wstring c = current ? current->Data() : L"";
+            if (ParseWorkPackage(c, project_url).valid) return task_from_result<String^>(current);
+            return ReadLocalTextIfExists(L"v08_scheduler_anonymous.xml");
+        });
     }
 
     std::wstring BuildRequest(const std::shared_ptr<CycleState>& s, unsigned int cpus, unsigned long long mem_bytes, const DiskInfo& disk, bool request_work, const std::wstring& result_xml)
@@ -557,7 +588,7 @@ namespace
         x << L"<platform>" << EscapeXml(s->package.platform) << L"</platform>\n";
         x << L"<version_num>" << s->package.version_num << L"</version_num>\n";
         x << L"<app_version_num>" << s->package.version_num << L"</app_version_num>\n";
-        x << L"<stderr_out><core_client_version>8.0.0</core_client_version>\nXbox Series X Developer Mode PeriodSearch port v0.9\n</stderr_out>\n";
+        x << L"<stderr_out><core_client_version>8.0.0</core_client_version>\nXbox Series X Developer Mode PeriodSearch port v0.9.1\n</stderr_out>\n";
         x << L"<file_info>\n";
         x << L"<name>" << EscapeXml(rec.name) << L"</name>\n";
         x << L"<nbytes>" << s->upload_info.nbytes << L"</nbytes>\n";
@@ -586,18 +617,18 @@ namespace
             UploadInfo info;
             info.nbytes = file_buffer ? file_buffer->Length : 0;
             info.md5 = file_buffer ? HashBuffer(file_buffer, HashAlgorithmNames::Md5) : L"";
+            info.certificate_present = !rec.xml_signature.empty();
             if (!file_buffer || !info.nbytes) { info.error = L"output file is empty"; return task_from_result(info); }
             if (rec.upload_url.empty()) { info.error = L"upload URL missing"; return task_from_result(info); }
-            if (rec.xml_signature.empty()) { info.error = L"upload certificate signature missing"; return task_from_result(info); }
-            if (rec.max_nbytes <= 0) { info.error = L"max_nbytes missing"; return task_from_result(info); }
 
+            const double max_bytes = rec.max_nbytes > 0 ? rec.max_nbytes : (double)info.nbytes * 2.0 + 1024.0;
             std::wostringstream hs;
             hs << std::fixed << std::setprecision(0);
             hs << L"<data_server_request>\n";
             hs << L"<core_client_major_version>8</core_client_major_version>\n<core_client_minor_version>0</core_client_minor_version>\n<core_client_release>0</core_client_release>\n";
             hs << L"<file_upload>\n<file_info>\n<name>" << EscapeXml(rec.name) << L"</name>\n";
             hs << L"<xml_signature>\n" << rec.xml_signature << L"\n</xml_signature>\n";
-            hs << L"<max_nbytes>" << rec.max_nbytes << L"</max_nbytes>\n</file_info>\n";
+            hs << L"<max_nbytes>" << max_bytes << L"</max_nbytes>\n</file_info>\n";
             hs << L"<nbytes>" << info.nbytes << L"</nbytes>\n";
             hs << L"<md5_cksum>" << info.md5 << L"</md5_cksum>\n<offset>0</offset>\n<data>\n";
 
@@ -687,7 +718,7 @@ namespace
 
     std::wstring CycleReport(const std::shared_ptr<CycleState>& s)
     {
-        std::wstring r = L"v0.9 complete BOINC cycle report\n\n";
+        std::wstring r = L"v0.9.1 complete BOINC cycle report\n\n";
         r += L"Smoke validation: " + s->smoke;
         r += L"\nProject: " + s->project;
         r += L"\nAccount: " + s->account;
@@ -719,7 +750,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     auto scroll = ref new ScrollViewer(); scroll->VerticalScrollMode = ScrollMode::Auto; scroll->VerticalScrollBarVisibility = ScrollBarVisibility::Auto;
     auto panel = ref new StackPanel(); panel->MaxWidth = 1060; panel->Margin = Thickness(110,54,110,54); panel->Spacing = 14;
     auto title = ref new TextBlock(); title->Text = ref new String(L"BOINC Xbox"); title->FontSize = 48; title->HorizontalAlignment = HorizontalAlignment::Center;
-    auto sub = ref new TextBlock(); sub->Text = ref new String(L"v0.9 - Complete upload + scheduler report cycle"); sub->FontSize = 22; sub->HorizontalAlignment = HorizontalAlignment::Center;
+    auto sub = ref new TextBlock(); sub->Text = ref new String(L"v0.9.1 - Complete upload + scheduler report cycle"); sub->FontSize = 22; sub->HorizontalAlignment = HorizontalAlignment::Center;
     auto runtime = ref new TextBlock(); runtime->Text = PS(L"CPU threads=" + std::to_wstring(cpus) + L", memory=" + std::to_wstring(mem/1048576ULL) + L" MB, disk free=" + std::to_wstring(disk.free/1048576ULL) + L" MB"); runtime->FontSize = 17;
 
     std::wstring initial = GetSetting(L"ProjectUrl"); if (initial.empty()) initial = L"https://asteroidsathome.net/boinc/";
@@ -727,7 +758,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     auto email = ref new TextBox(); email->Header = ref new String(L"Email (only needed if no authenticator is stored)"); email->Text = PS(GetSetting(L"AccountEmail")); email->FontSize = 19;
     auto pass = ref new PasswordBox(); pass->Header = ref new String(L"Password (never stored)"); pass->FontSize = 19;
     auto run = ref new Button(); run->Content = ref new String(L"Run one complete BOINC workunit cycle"); run->FontSize = 21; run->Padding = Thickness(26,14,26,14);
-    auto hint = ref new TextBlock(); hint->Text = ref new String(L"v0.9 resumes the unreported v0.8 workunit when available, recomputes it for an accurate runtime, uploads the result through the BOINC file upload handler, reports completion to the scheduler and requires a result ACK. It never requests more than one workunit at a time."); hint->TextWrapping = TextWrapping::Wrap; hint->FontSize = 16; hint->Opacity = 0.84;
+    auto hint = ref new TextBlock(); hint->Text = ref new String(L"v0.9.1 first resumes any unreported v0.9/v0.8 workunit, then uploads through the BOINC file upload handler and reports the completed result to the scheduler. A missing local upload certificate no longer blocks the request before the server can decide whether certificates are required."); hint->TextWrapping = TextWrapping::Wrap; hint->FontSize = 16; hint->Opacity = 0.84;
     auto reportTitle = ref new TextBlock(); reportTitle->Text = ref new String(L"Complete-cycle report"); reportTitle->FontSize = 28;
     auto report = ref new TextBlock(); report->Text = ref new String(L"Not run yet."); report->FontSize = 16; report->TextWrapping = TextWrapping::Wrap;
     auto reportBox = ref new Border(); reportBox->Padding = Thickness(20); reportBox->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255,32,42,51)); reportBox->Child = report;
@@ -751,7 +782,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         }
         catch (...) {}
 
-        run->IsEnabled = false; report->Text = ref new String(L"Running v0.9 complete cycle..."); log->Text = ref new String(L""); append(L"v0.9 cycle started");
+        run->IsEnabled = false; report->Text = ref new String(L"Running v0.9.1 complete cycle..."); log->Text = ref new String(L""); append(L"v0.9.1 cycle started");
         const auto ui = task_continuation_context::use_current();
 
         create_task(Package::Current->InstalledLocation->GetFileAsync(ref new String(L"PeriodSearchSampleIn.txt")))
@@ -785,7 +816,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                 SaveAuth(project_url,s->email,s->authenticator); s->account=L"PASS: authenticator received and stored";
             });
         }, ui)
-        .then([=]() -> task<String^> { return ReadLocalTextIfExists(L"v08_scheduler_anonymous.xml"); }, ui)
+        .then([=]() -> task<String^> { return LoadCachedWorkXml(project_url); }, ui)
         .then([=](String^ cached) -> task<String^>
         {
             std::wstring xml = cached ? cached->Data() : L"";
@@ -793,7 +824,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             const std::wstring last = GetSetting(L"LastReportedResult");
             if (p.valid && p.result_name != last)
             {
-                s->package=p; s->work_source=L"PASS: resumed unreported v0.8 workunit"; append(L"Resuming cached v0.8 workunit: "+p.result_name); return task_from_result<String^>(cached);
+                s->package=p; s->work_source=L"PASS: resumed unreported workunit"; append(L"Resuming cached workunit: "+p.result_name); return task_from_result<String^>(cached);
             }
             s->work_source=L"PASS: requesting one new workunit"; append(L"Requesting one new workunit");
             return PostXml(s->scheduler_url,BuildRequest(s,cpus,mem,disk,true,L""));
@@ -805,9 +836,17 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             {
                 ++s->rpc_seqno; SetSetting(L"RpcSeqno",std::to_wstring(s->rpc_seqno));
                 std::wstring host=Tag(xml,L"hostid"); if(!host.empty()){ try{s->host_id=std::stoul(host);SetSetting(L"HostId",host);}catch(...){} }
-                s->package=ParseWorkPackage(xml,project_url); SaveText(L"v09_scheduler_work.xml",xml);
+                s->package=ParseWorkPackage(xml,project_url);
+                if (!s->package.valid) { s->diagnostics=ServerDiagnostics(xml); throw ref new FailureException(PS(L"No workunit: "+s->diagnostics)); }
+                return SaveText(L"v09_scheduler_work.xml",xml).then([=]()
+                {
+                    return SaveText(L"v09_active_work.xml",xml);
+                }).then([=]()
+                {
+                    s->work=L"PASS: "+s->package.result_name; s->diagnostics=ServerDiagnostics(xml);
+                    return DownloadInputs(s->package).then([=](){ s->download=L"PASS: input file(s) ready"; });
+                });
             }
-            if (!s->package.valid) { s->diagnostics=ServerDiagnostics(xml); throw ref new FailureException(PS(L"No workunit: "+s->diagnostics)); }
             s->work=L"PASS: "+s->package.result_name; s->diagnostics=ServerDiagnostics(xml);
             return DownloadInputs(s->package).then([=](){ s->download=L"PASS: input file(s) ready"; });
         }, ui)
@@ -826,10 +865,11 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             {
                 const FileRecord* rec=FindFile(s->package,physical); if(!rec) throw ref new FailureException(ref new String(L"Output file_info missing"));
                 append(L"Uploading result through BOINC file upload handler...");
+                if (rec->xml_signature.empty()) append(L"Upload certificate absent in scheduler reply; trying server-compatible unsigned upload.");
                 return UploadBoincFile(*rec,physical).then([=](UploadInfo ui2)
                 {
                     s->upload_info=ui2; if(!ui2.ok){s->upload=L"FAIL: "+ui2.error; throw ref new FailureException(PS(s->upload));}
-                    s->upload=L"PASS: "+std::to_wstring(ui2.nbytes)+L" bytes, md5="+ui2.md5; return task_from_result();
+                    s->upload=L"PASS: "+std::to_wstring(ui2.nbytes)+L" bytes, md5="+ui2.md5+(ui2.certificate_present?L", signed certificate":L", server accepted without certificate"); return task_from_result();
                 });
             });
         }, ui)
@@ -847,17 +887,19 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
             const bool ack=ResultAcked(xml,s->package.result_name); s->ack=ack?L"PASS: server acknowledged result":L"FAIL: no result_ack";
             s->diagnostics=ServerDiagnostics(xml);
             std::wstring credit=Tag(xml,L"user_total_credit"); s->credit=credit.empty()?L"not returned; validator is asynchronous":L"user_total_credit="+credit+L" (validation may still be pending)";
-            SaveText(L"v09_scheduler_report.xml",xml);
-            if(!ack) throw ref new FailureException(ref new String(L"Scheduler did not ACK result"));
-            SetSetting(L"LastReportedResult",s->package.result_name);
-            return task_from_result();
+            return SaveText(L"v09_scheduler_report.xml",xml).then([=]()
+            {
+                if(!ack) throw ref new FailureException(ref new String(L"Scheduler did not ACK result"));
+                SetSetting(L"LastReportedResult",s->package.result_name);
+                return SaveText(L"v09_active_work.xml",L"");
+            });
         }, ui)
         .then([=](task<void> finished)
         {
             try { finished.get(); }
             catch(Exception^ ex){ append(L"Cycle error: "+std::wstring(ex->Message->Data())); if(s->report==L"PENDING"&&s->upload.rfind(L"PASS",0)==0)s->report=L"FAIL before ACK"; }
             catch(...){ append(L"Cycle error: unknown exception"); }
-            report->Text=PS(CycleReport(s)); run->IsEnabled=true; append(L"v0.9 cycle finished");
+            report->Text=PS(CycleReport(s)); run->IsEnabled=true; append(L"v0.9.1 cycle finished");
         }, ui);
     });
 
