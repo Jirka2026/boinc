@@ -24,7 +24,16 @@ namespace
 {
     std::wstring g_work_directory;
     std::atomic<double> g_fraction_done(0.0);
+    std::atomic<unsigned int> g_checkpoint_count(0);
+    std::atomic<unsigned int> g_checkpoint_interval_seconds(60);
+    std::atomic<long long> g_last_checkpoint_ms(0);
     FILE* g_input_file = nullptr;
+
+    long long steady_ms()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
 
     struct PeriodSearchExit
     {
@@ -126,8 +135,7 @@ FILE* periodsearch_open_file(const char* path, const char* mode)
     FILE* file = nullptr;
     if (_wfopen_s(&file, full_path.c_str(), wide_mode.c_str()) != 0) return nullptr;
 
-    // The upstream PeriodSearch source does not close period_search_in before returning.
-    // Track that one handle explicitly so consecutive validation runs can replace the file.
+    // The upstream source keeps period_search_in open until process exit.
     if (is_period_search_input(path, mode))
     {
         close_input_file();
@@ -167,10 +175,28 @@ int parse_command_line(char*, char** argv)
     return 1;
 }
 
-int boinc_init() { g_fraction_done.store(0.0); return 0; }
+int boinc_init()
+{
+    g_fraction_done.store(0.0);
+    g_last_checkpoint_ms.store(steady_ms());
+    return 0;
+}
+
 int boinc_is_standalone() { return 0; }
-int boinc_time_to_checkpoint() { return 0; }
-void boinc_checkpoint_completed() {}
+
+int boinc_time_to_checkpoint()
+{
+    const unsigned int seconds = g_checkpoint_interval_seconds.load();
+    if (!seconds) return 0;
+    const long long last = g_last_checkpoint_ms.load();
+    return (steady_ms() - last) >= static_cast<long long>(seconds) * 1000LL ? 1 : 0;
+}
+
+void boinc_checkpoint_completed()
+{
+    g_last_checkpoint_ms.store(steady_ms());
+    g_checkpoint_count.fetch_add(1);
+}
 
 void boinc_fraction_done(double fraction)
 {
@@ -233,8 +259,9 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
     PeriodSearchRunResult result;
     g_work_directory = work_directory;
     g_fraction_done.store(0.0);
+    g_checkpoint_count.store(0);
+    g_last_checkpoint_ms.store(steady_ms());
 
-    // Defensive cleanup in case a previous solver invocation exited through an exception.
     close_input_file();
 
     if (fresh_start)
@@ -266,12 +293,11 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
         result.error = L"Unknown native PeriodSearch exception";
     }
 
-    // Upstream period_search_BOINC.cpp leaves its input FILE* open.
-    // Close it before the next v0.8 validation overwrites period_search_in.
     close_input_file();
 
     result.elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     result.fraction_done = g_fraction_done.load();
+    result.checkpoints = g_checkpoint_count.load();
     result.output = read_work_file(L"period_search_out");
 
     if (result.exit_code == 0 && result.output.empty() && result.error.empty())
@@ -281,3 +307,5 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
 }
 
 double periodsearch_progress() { return g_fraction_done.load(); }
+unsigned int periodsearch_checkpoint_count() { return g_checkpoint_count.load(); }
+void periodsearch_set_checkpoint_interval(unsigned int seconds) { g_checkpoint_interval_seconds.store(seconds); }
