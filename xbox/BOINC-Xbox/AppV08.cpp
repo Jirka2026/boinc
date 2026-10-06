@@ -77,7 +77,41 @@ namespace
         WorkPackage package;
     };
 
+    struct DiskInfo
+    {
+        unsigned long long total = 0;
+        unsigned long long free = 0;
+        bool measured = false;
+    };
+
     String^ PS(const std::wstring& s) { return ref new String(s.c_str()); }
+
+    DiskInfo QueryDiskInfo()
+    {
+        DiskInfo d;
+        try
+        {
+            const std::wstring path = ApplicationData::Current->LocalFolder->Path->Data();
+            ULARGE_INTEGER free_available = {};
+            ULARGE_INTEGER total_bytes = {};
+            ULARGE_INTEGER total_free = {};
+            if (GetDiskFreeSpaceExW(path.c_str(), &free_available, &total_bytes, &total_free))
+            {
+                d.total = total_bytes.QuadPart;
+                d.free = free_available.QuadPart;
+                d.measured = d.total > 0 && d.free > 0;
+            }
+        }
+        catch (...) {}
+
+        if (!d.measured)
+        {
+            // Fallback scratch budget for Xbox UWP when the sandbox does not expose volume statistics.
+            d.total = 1024ULL * 1024ULL * 1024ULL;
+            d.free = 512ULL * 1024ULL * 1024ULL;
+        }
+        return d;
+    }
 
     std::wstring Trim(std::wstring s)
     {
@@ -509,7 +543,7 @@ namespace
         return p;
     }
 
-    std::wstring BuildAnonymousRequest(const std::shared_ptr<SuiteState>& s, unsigned int cpus, unsigned long long mem_bytes)
+    std::wstring BuildAnonymousRequest(const std::shared_ptr<SuiteState>& s, unsigned int cpus, unsigned long long mem_bytes, unsigned long long disk_total, unsigned long long disk_free)
     {
         std::wstring cpid = GetSetting(L"HostCPID");
         if (cpid.empty())
@@ -533,7 +567,7 @@ namespace
         x += L"<p_vendor>AMD</p_vendor><p_model>Xbox Series X Developer Mode</p_model><p_features>x86_64</p_features>";
         x += L"<p_fpops>1e10</p_fpops><p_iops>1e10</p_iops><p_membw>1e9</p_membw>";
         x += L"<m_nbytes>" + std::to_wstring(mem_bytes) + L"</m_nbytes><m_cache>0</m_cache><m_swap>0</m_swap>";
-        x += L"<d_total>0</d_total><d_free>0</d_free><os_name>Windows</os_name><os_version>Xbox UWP Developer Mode</os_version></host_info>\n";
+        x += L"<d_total>" + std::to_wstring(disk_total) + L"</d_total><d_free>" + std::to_wstring(disk_free) + L"</d_free><os_name>Windows</os_name><os_version>Xbox UWP Developer Mode</os_version></host_info>\n";
         x += L"<app_versions>\n";
         x += L"<app_version><app_name>period_search</app_name><platform>windows_x86_64</platform><version_num>10222</version_num><avg_ncpus>1</avg_ncpus><flops>1e10</flops></app_version>\n";
         x += L"</app_versions>\n";
@@ -570,6 +604,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
     if (!cpus) cpus = 1;
     unsigned long long mem = 0;
     try { mem = MemoryManager::AppMemoryUsageLimit; } catch (Exception^) {}
+    const DiskInfo disk = QueryDiskInfo();
 
     auto root = ref new Grid();
     root->Background = ref new SolidColorBrush(ColorHelper::FromArgb(255, 16, 24, 32));
@@ -583,7 +618,12 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
 
     auto title = ref new TextBlock(); title->Text = ref new String(L"BOINC Xbox"); title->FontSize = 48; title->HorizontalAlignment = HorizontalAlignment::Center;
     auto subtitle = ref new TextBlock(); subtitle->Text = ref new String(L"v0.8 - Accelerated science + real work pipeline"); subtitle->FontSize = 22; subtitle->HorizontalAlignment = HorizontalAlignment::Center;
-    auto runtime = ref new TextBlock(); runtime->Text = PS(L"Runtime: CPU threads=" + std::to_wstring(cpus) + L", app memory limit=" + std::to_wstring(mem / 1048576ULL) + L" MB"); runtime->FontSize = 17;
+    auto runtime = ref new TextBlock();
+    runtime->Text = PS(L"Runtime: CPU threads=" + std::to_wstring(cpus)
+        + L", app memory limit=" + std::to_wstring(mem / 1048576ULL) + L" MB"
+        + L", scheduler disk free=" + std::to_wstring(disk.free / 1048576ULL) + L" MB"
+        + (disk.measured ? L" (measured)" : L" (fallback scratch budget)"));
+    runtime->FontSize = 17;
 
     std::wstring initial_url = GetSetting(L"ProjectUrl");
     if (initial_url.empty()) initial_url = L"https://asteroidsathome.net/boinc/";
@@ -676,6 +716,9 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
         report->Text = ref new String(L"Running accelerated v0.8 suite...");
         log->Text = ref new String(L"");
         append(L"v0.8 suite started");
+        append(L"Scheduler disk advertisement: total=" + std::to_wstring(disk.total / 1048576ULL)
+            + L" MB, free=" + std::to_wstring(disk.free / 1048576ULL) + L" MB"
+            + (disk.measured ? L" measured" : L" fallback"));
         const auto ui = task_continuation_context::use_current();
 
         create_task(Package::Current->InstalledLocation->GetFileAsync(ref new String(L"PeriodSearchSampleIn.txt")))
@@ -775,7 +818,7 @@ void App::OnLaunched(LaunchActivatedEventArgs^)
                 return task_from_result<String^>(ref new String(L""));
             }
             append(L"Requesting one real PeriodSearch task via anonymous platform...");
-            const std::wstring request = BuildAnonymousRequest(s, cpus, mem);
+            const std::wstring request = BuildAnonymousRequest(s, cpus, mem, disk.total, disk.free);
             return PostXml(s->scheduler_url, request);
         }, ui)
         .then([=](String^ reply) -> task<void>
