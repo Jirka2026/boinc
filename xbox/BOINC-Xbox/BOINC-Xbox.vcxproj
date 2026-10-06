@@ -26,12 +26,12 @@
   <ItemGroup><ApplicationDefinition Include="App.xaml"><SubType>Designer</SubType></ApplicationDefinition></ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp"><PrecompiledHeader>Create</PrecompiledHeader></ClCompile>
-    <ClCompile Include="AppV08.cpp"><DependentUpon>App.xaml</DependentUpon></ClCompile>
+    <ClCompile Include="AppV08.cpp"><DependentUpon>App.xaml</DependentUpon><ForcedIncludeFiles>AppV08Compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles></ClCompile>
     <ClCompile Include="PeriodSearchXbox.cpp" />
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="pch.h" /><ClInclude Include="App.xaml.h"><DependentUpon>App.xaml</DependentUpon></ClInclude><ClInclude Include="PeriodSearchXbox.h" />
+    <ClInclude Include="pch.h" /><ClInclude Include="App.xaml.h"><DependentUpon>App.xaml</DependentUpon></ClInclude><ClInclude Include="AppV08Compat.h" /><ClInclude Include="PeriodSearchXbox.h" />
     <ClInclude Include="PeriodSearchShim\boinc_win.h" /><ClInclude Include="PeriodSearchShim\str_util.h" /><ClInclude Include="PeriodSearchShim\util.h" /><ClInclude Include="PeriodSearchShim\filesys.h" /><ClInclude Include="PeriodSearchShim\boinc_api.h" /><ClInclude Include="PeriodSearchShim\mfile.h" /><ClInclude Include="PeriodSearchShim\graphics2.h" /><ClInclude Include="..\..\client\xbox\xbox_platform.h" />
   </ItemGroup>
   <ItemGroup><FxCompile Include="ComputeBench.hlsl"><EntryPointName>main</EntryPointName><ShaderType>Compute</ShaderType><ShaderModel>5.0</ShaderModel><SuppressStartupBanner>true</SuppressStartupBanner></FxCompile></ItemGroup>
