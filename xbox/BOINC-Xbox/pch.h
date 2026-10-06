@@ -18,6 +18,7 @@
 
 // C++/CX compatibility for the v0.8 integration source.
 // Uri is declared in Windows::Foundation, while AppV08 uses it unqualified.
+namespace Windows { namespace Foundation {} }
 using namespace Windows::Foundation;
 
 // "generic" is a C++/CX contextual keyword. AppV08 uses it as a local variable.
