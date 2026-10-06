@@ -24,6 +24,7 @@ namespace
 {
     std::wstring g_work_directory;
     std::atomic<double> g_fraction_done(0.0);
+    FILE* g_input_file = nullptr;
 
     struct PeriodSearchExit
     {
@@ -53,6 +54,26 @@ namespace
         if (!result.empty() && result.back() != L'\\' && result.back() != L'/') result += L'\\';
         result += p;
         return result;
+    }
+
+    void close_input_file()
+    {
+        if (g_input_file)
+        {
+            fclose(g_input_file);
+            g_input_file = nullptr;
+        }
+    }
+
+    bool is_period_search_input(const char* path, const char* mode)
+    {
+        if (!path || !mode || !strchr(mode, 'r')) return false;
+        const char* base = path;
+        for (const char* p = path; *p; ++p)
+        {
+            if (*p == '\\' || *p == '/') base = p + 1;
+        }
+        return strcmp(base, "period_search_in") == 0;
     }
 
     void remove_work_file(const wchar_t* name)
@@ -104,6 +125,15 @@ FILE* periodsearch_open_file(const char* path, const char* mode)
     const std::wstring wide_mode = widen_ascii(mode ? mode : "r");
     FILE* file = nullptr;
     if (_wfopen_s(&file, full_path.c_str(), wide_mode.c_str()) != 0) return nullptr;
+
+    // The upstream PeriodSearch source does not close period_search_in before returning.
+    // Track that one handle explicitly so consecutive validation runs can replace the file.
+    if (is_period_search_input(path, mode))
+    {
+        close_input_file();
+        g_input_file = file;
+    }
+
     return file;
 }
 
@@ -204,6 +234,9 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
     g_work_directory = work_directory;
     g_fraction_done.store(0.0);
 
+    // Defensive cleanup in case a previous solver invocation exited through an exception.
+    close_input_file();
+
     if (fresh_start)
     {
         remove_work_file(L"period_search_out");
@@ -232,6 +265,10 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
         result.exit_code = -1001;
         result.error = L"Unknown native PeriodSearch exception";
     }
+
+    // Upstream period_search_BOINC.cpp leaves its input FILE* open.
+    // Close it before the next v0.8 validation overwrites period_search_in.
+    close_input_file();
 
     result.elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     result.fraction_done = g_fraction_done.load();
