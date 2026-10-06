@@ -13,13 +13,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="AppV08.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="AppV11.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="PeriodSearchXbox.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="App.xaml.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="AppV08Compat.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PeriodSearchXbox.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PeriodSearchShim\boinc_win.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PeriodSearchShim\str_util.h"><Filter>Header Files</Filter></ClInclude>
