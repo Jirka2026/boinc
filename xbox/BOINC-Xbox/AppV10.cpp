@@ -2,6 +2,7 @@
 #include "App.xaml.h"
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <intrin.h>
 #include <iomanip>
@@ -44,6 +45,12 @@ using namespace Windows::UI::Xaml::Media;
 
 namespace
 {
+    long long MonotonicMs10()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
     struct V10Stats
     {
         unsigned long long completed = 0;
@@ -60,6 +67,7 @@ namespace
         std::atomic<bool> running{ false };
         std::atomic<bool> stop_requested{ false };
         std::atomic<bool> network_enabled{ true };
+        std::atomic<long long> science_started_ms{ 0 };
         int target_success = 3;
         int session_success = 0;
         int session_attempts = 0;
@@ -167,7 +175,7 @@ namespace
         const unsigned int major = ((unsigned int)got >> 12) & 0xF;
         const unsigned int minor = ((unsigned int)got >> 8) & 0xF;
         return L"D3D11 hardware compute device: PASS, FL " + std::to_wstring(major) + L"." + std::to_wstring(minor) +
-            L" (science backend remains CPU in v1.0)";
+            L" (science backend remains CPU in v1.0.x)";
     }
 
     task<bool> LocalFileExists10(const std::wstring& name)
@@ -222,7 +230,6 @@ namespace
         {
             return LocalFileExists10(L"period_search_state").then([=](bool checkpoint_exists) -> task<void>
             {
-                // A checkpoint may only be reused for the exact result that created it.
                 const bool checkpoint_matches = GetSetting(L"V10CheckpointResult") == s->package.result_name;
                 const bool fresh_start = !(resumed && checkpoint_exists && checkpoint_matches);
                 SetSetting(L"V10CheckpointResult", s->package.result_name);
@@ -311,9 +318,6 @@ namespace
         auto s = std::make_shared<CycleState>();
         s->project_url = project_url;
         s->email = *email;
-        // Keep the existing BOINC host identity and monotonically increasing RPC
-        // sequence. Sending hostid=0/rpc_seqno=0 repeatedly can make a scheduler
-        // treat this as a reattached client and disturb in-progress results.
         try
         {
             const std::wstring h = GetSetting(L"HostId");
@@ -523,7 +527,7 @@ namespace
 
     std::wstring V10Report(const V10CycleResult& r, const V10Stats& stats, const V10Engine& engine)
     {
-        std::wstring out = L"BOINC Xbox v1.0 production-test report\n\n";
+        std::wstring out = L"BOINC Xbox v1.0.2 production-test report\n\n";
         if (r.state)
         {
             out += L"Smoke: " + r.state->smoke;
@@ -583,7 +587,7 @@ namespace BOINC_Xbox
         title->FontSize = 48;
         title->HorizontalAlignment = HorizontalAlignment::Center;
         auto sub = ref new TextBlock();
-        sub->Text = ref new String(L"v1.0 - automated Asteroids@home production test");
+        sub->Text = ref new String(L"v1.0.2 - automated Asteroids@home production test");
         sub->FontSize = 23;
         sub->HorizontalAlignment = HorizontalAlignment::Center;
 
@@ -626,7 +630,7 @@ namespace BOINC_Xbox
         buttons->Orientation = Orientation::Horizontal;
         buttons->Spacing = 12;
         auto start = ref new Button();
-        start->Content = ref new String(L"Start v1.0 engine");
+        start->Content = ref new String(L"Start v1.0.2 engine");
         start->FontSize = 19;
         start->Padding = Thickness(22,12,22,12);
         auto stop = ref new Button();
@@ -674,7 +678,7 @@ namespace BOINC_Xbox
         reportTitle->Text = ref new String(L"Last cycle report");
         reportTitle->FontSize = 25;
         auto report = ref new TextBlock();
-        report->Text = ref new String(L"No v1.0 cycle has run yet.");
+        report->Text = ref new String(L"No v1.0.2 cycle has run yet.");
         report->FontSize = 15;
         report->TextWrapping = TextWrapping::Wrap;
         auto reportBox = ref new Border();
@@ -686,7 +690,7 @@ namespace BOINC_Xbox
         logTitle->Text = ref new String(L"Session log");
         logTitle->FontSize = 24;
         auto log = ref new TextBlock();
-        log->Text = ref new String(L"Ready. Pending work from v0.9/v1.0 will be resumed automatically.\n");
+        log->Text = ref new String(L"Ready. Pending work from v0.9/v1.0.x will be resumed automatically.\n");
         log->FontSize = 14;
         log->TextWrapping = TextWrapping::Wrap;
         auto logBox = ref new Border();
@@ -704,8 +708,15 @@ namespace BOINC_Xbox
 
         auto set_stage = [=](const std::wstring& st, const std::wstring& result_name)
         {
+            const bool same_science = engine->stage == L"SCIENCE COMPUTE" && st == L"SCIENCE COMPUTE" &&
+                engine->current_result == result_name;
             engine->stage = st;
             engine->current_result = result_name;
+            if (st == L"SCIENCE COMPUTE")
+            {
+                if (!same_science) engine->science_started_ms.store(MonotonicMs10());
+            }
+            else engine->science_started_ms.store(0);
         };
 
         auto update_stats = [=]()
@@ -716,6 +727,7 @@ namespace BOINC_Xbox
         auto finish_session = [=](const std::wstring& reason)
         {
             engine->running.store(false);
+            engine->science_started_ms.store(0);
             engine->stage = reason;
             start->IsEnabled = true;
             stop->IsEnabled = false;
@@ -733,6 +745,15 @@ namespace BOINC_Xbox
             unsigned long long usage = 0;
             try { usage = MemoryManager::AppMemoryUsage; } catch (Exception^) {}
             const double progress = periodsearch_progress() * 100.0;
+            const long long science_start = engine->science_started_ms.load();
+            const bool science_running = engine->stage == L"SCIENCE COMPUTE" && science_start > 0;
+            long long science_seconds = 0;
+            if (science_running)
+            {
+                const long long delta = MonotonicMs10() - science_start;
+                science_seconds = delta > 0 ? delta / 1000 : 0;
+            }
+
             std::wostringstream o;
             o << L"State: " << engine->stage
               << L"   network=" << (engine->network_enabled.load() ? L"ON" : L"PAUSED")
@@ -742,9 +763,22 @@ namespace BOINC_Xbox
             else o << L" / continuous";
             o << L"   attempts=" << engine->session_attempts;
             if (!engine->current_result.empty()) o << L"\nCurrent result: " << engine->current_result;
-            o << L"\nScience progress: " << std::fixed << std::setprecision(1) << progress << L" %"
-              << L"   checkpoints this run=" << periodsearch_checkpoint_count()
-              << L"   app memory=" << (usage/1048576ULL) << L" / " << mem_mb << L" MB";
+
+            if (science_running)
+            {
+                o << L"\nScience running: " << science_seconds << L" s";
+                if (progress > 0.05)
+                    o << L"   progress=" << std::fixed << std::setprecision(1) << progress << L" %";
+                else
+                    o << L"   progress=n/a (stable CPU path)";
+                o << L"   recovery=stage-persistent";
+            }
+            else
+            {
+                o << L"\nScience: idle / waiting for compute stage";
+            }
+
+            o << L"   app memory=" << (usage/1048576ULL) << L" / " << mem_mb << L" MB";
             status->Text = PS(o.str());
         });
         timer->Start();
@@ -770,7 +804,7 @@ namespace BOINC_Xbox
             *stats = V10Stats();
             SaveV10Stats(*stats);
             update_stats();
-            append(L"Persistent v1.0 statistics reset.");
+            append(L"Persistent v1.0.x statistics reset.");
         });
 
         start->Click += ref new RoutedEventHandler([=](Object^, RoutedEventArgs^)
@@ -796,6 +830,7 @@ namespace BOINC_Xbox
             engine->session_attempts = 0;
             engine->smoke_needed = true;
             engine->stop_requested.store(false);
+            engine->science_started_ms.store(0);
             engine->running.store(true);
             engine->stage = L"STARTING";
             engine->current_result.clear();
@@ -805,8 +840,8 @@ namespace BOINC_Xbox
             reset->IsEnabled = false;
             mode->IsEnabled = false;
             log->Text = ref new String(L"");
-            append(L"BOINC Xbox v1.0 session started.");
-            append(L"Checkpoint interval: 45 s. Recovery state is persistent.");
+            append(L"BOINC Xbox v1.0.2 session started.");
+            append(L"Stable CPU science path active. WU-internal checkpointing is not shown; stage recovery is persistent.");
 
             const auto ui = task_continuation_context::use_current();
             auto next = std::make_shared<std::function<void()>>();
@@ -859,6 +894,7 @@ namespace BOINC_Xbox
 
                     const int delay_seconds = result.no_work ? 60 : (result.success ? 12 : 15);
                     engine->stage = L"WAITING " + std::to_wstring(delay_seconds) + L" s BEFORE NEXT CYCLE";
+                    engine->science_started_ms.store(0);
                     create_task([delay_seconds]() { std::this_thread::sleep_for(std::chrono::seconds(delay_seconds)); })
                         .then([=]() { (*next)(); }, ui);
                 }, ui);
