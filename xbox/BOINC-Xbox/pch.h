@@ -17,13 +17,12 @@
 #include <chrono>
 #include <memory>
 
-// C++/CX compatibility for the v0.8 integration source.
-// Uri is declared in Windows::Foundation, while AppV08 uses it unqualified.
+// C++/CX compatibility for the integration sources.
+// Import only Uri instead of the whole Windows::Foundation namespace;
+// importing the namespace makes EventRegistrationToken ambiguous in event.h.
 namespace Windows { namespace Foundation {} }
-using namespace Windows::Foundation;
+using Windows::Foundation::Uri;
 
-// "generic" is a C++/CX contextual keyword. AppV08 uses it as a local variable.
+// "generic" is a C++/CX contextual keyword. Older integration code uses it
+// as a local variable, so keep this compatibility alias.
 #define generic generic_url
-
-// Windows::System exposes Diagnostics; rename the local AppV08 helper token.
-#define Diagnostics ServerDiagnostics
