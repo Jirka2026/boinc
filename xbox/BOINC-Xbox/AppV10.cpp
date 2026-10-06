@@ -181,11 +181,20 @@ namespace
 
     task<String^> LoadV10CachedWorkXml(const std::wstring& project_url)
     {
+        // Only a true active-state file may be resumed. Old scheduler replies can
+        // contain already reported jobs, so they are deliberately ignored here.
         return ReadLocalTextIfExists(L"v10_active_work.xml").then([project_url](String^ active) -> task<String^>
         {
             const std::wstring a = active ? active->Data() : L"";
             if (ParseWorkPackage(a, project_url).valid) return task_from_result<String^>(active);
-            return LoadCachedWorkXml(project_url);
+            // One-time migration path from v0.9.1: only its active file, never its
+            // historical scheduler-work cache.
+            return ReadLocalTextIfExists(L"v09_active_work.xml");
+        }).then([project_url](String^ legacy) -> String^
+        {
+            const std::wstring l = legacy ? legacy->Data() : L"";
+            if (ParseWorkPackage(l, project_url).valid) return legacy;
+            return ref new String(L"");
         });
     }
 
@@ -213,7 +222,10 @@ namespace
         {
             return LocalFileExists10(L"period_search_state").then([=](bool checkpoint_exists) -> task<void>
             {
-                const bool fresh_start = !(resumed && checkpoint_exists);
+                // A checkpoint may only be reused for the exact result that created it.
+                const bool checkpoint_matches = GetSetting(L"V10CheckpointResult") == s->package.result_name;
+                const bool fresh_start = !(resumed && checkpoint_exists && checkpoint_matches);
+                SetSetting(L"V10CheckpointResult", s->package.result_name);
                 const std::wstring dir = ApplicationData::Current->LocalFolder->Path->Data();
                 periodsearch_set_checkpoint_interval(45);
                 return create_task([dir, fresh_start]() { return periodsearch_run(dir, fresh_start); }).then([=](PeriodSearchRunResult r) -> task<void>
@@ -299,6 +311,17 @@ namespace
         auto s = std::make_shared<CycleState>();
         s->project_url = project_url;
         s->email = *email;
+        // Keep the existing BOINC host identity and monotonically increasing RPC
+        // sequence. Sending hostid=0/rpc_seqno=0 repeatedly can make a scheduler
+        // treat this as a reattached client and disturb in-progress results.
+        try
+        {
+            const std::wstring h = GetSetting(L"HostId");
+            if (!h.empty()) s->host_id = std::stoul(h);
+            const std::wstring q = GetSetting(L"RpcSeqno");
+            if (!q.empty()) s->rpc_seqno = std::stoi(q);
+        }
+        catch (...) {}
         auto resumed = std::make_shared<bool>(false);
 
         task<void> start = task_from_result();
@@ -463,6 +486,7 @@ namespace
                 SetSetting(L"V10ActivePhysical",L"");
                 SetSetting(L"V10ActiveBytes",L"");
                 SetSetting(L"V10ActiveMd5",L"");
+                SetSetting(L"V10CheckpointResult",L"");
                 return SaveText(L"v10_active_work.xml",L"").then([=]()
                 {
                     return SaveText(L"v09_active_work.xml",L"");
