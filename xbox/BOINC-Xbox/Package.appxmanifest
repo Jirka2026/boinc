@@ -8,7 +8,7 @@
   <Identity
     Name="Jirka2026.BOINCXbox.Dev"
     Publisher="CN=Jirka2026"
-    Version="0.9.1.0" />
+    Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="8e0a1ed4-4559-460b-958a-f2adc4d458f2" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
 
@@ -28,7 +28,7 @@
     <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="BOINC_Xbox.App">
       <uap:VisualElements
         DisplayName="BOINC Xbox"
-        Description="BOINC client and Asteroids PeriodSearch science port for Xbox Series X Developer Mode"
+        Description="Automated BOINC and Asteroids PeriodSearch production-test client for Xbox Series X Developer Mode"
         BackgroundColor="#1B5C99"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
