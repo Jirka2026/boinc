@@ -25,15 +25,7 @@ namespace
     std::wstring g_work_directory;
     std::atomic<double> g_fraction_done(0.0);
     std::atomic<unsigned int> g_checkpoint_count(0);
-    std::atomic<unsigned int> g_checkpoint_interval_seconds(60);
-    std::atomic<long long> g_last_checkpoint_ms(0);
     FILE* g_input_file = nullptr;
-
-    long long steady_ms()
-    {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-    }
 
     struct PeriodSearchExit
     {
@@ -119,6 +111,14 @@ namespace
         return out;
     }
 
+    std::wstring exit_error_text(int code)
+    {
+        if (code == -1) return L"PeriodSearch exit -1: period_search_in could not be opened";
+        if (code == 1) return L"PeriodSearch exit 1: output/checkpoint file open or write failed";
+        if (code == 2) return L"PeriodSearch exit 2: workunit exceeds a compiled PeriodSearch array limit";
+        return L"PeriodSearch exit code=" + std::to_wstring(code);
+    }
+
     int periodsearch_system(const char*) { return 0; }
 
     LPSTR periodsearch_get_command_line()
@@ -135,7 +135,8 @@ FILE* periodsearch_open_file(const char* path, const char* mode)
     FILE* file = nullptr;
     if (_wfopen_s(&file, full_path.c_str(), wide_mode.c_str()) != 0) return nullptr;
 
-    // The upstream source keeps period_search_in open until process exit.
+    // Upstream PeriodSearch keeps period_search_in open until process exit.
+    // Track the handle explicitly so consecutive solver runs can safely replace it.
     if (is_period_search_input(path, mode))
     {
         close_input_file();
@@ -178,25 +179,16 @@ int parse_command_line(char*, char** argv)
 int boinc_init()
 {
     g_fraction_done.store(0.0);
-    g_last_checkpoint_ms.store(steady_ms());
     return 0;
 }
 
 int boinc_is_standalone() { return 0; }
 
-int boinc_time_to_checkpoint()
-{
-    const unsigned int seconds = g_checkpoint_interval_seconds.load();
-    if (!seconds) return 0;
-    const long long last = g_last_checkpoint_ms.load();
-    return (steady_ms() - last) >= static_cast<long long>(seconds) * 1000LL ? 1 : 0;
-}
-
-void boinc_checkpoint_completed()
-{
-    g_last_checkpoint_ms.store(steady_ms());
-    g_checkpoint_count.fetch_add(1);
-}
+// v0.9.1 proved reliable with native PeriodSearch checkpoint callbacks disabled.
+// v1.0 keeps workunit-stage recovery, while native solver checkpoints are disabled
+// until checkpoint/resume is validated independently on Xbox/UWP.
+int boinc_time_to_checkpoint() { return 0; }
+void boinc_checkpoint_completed() {}
 
 void boinc_fraction_done(double fraction)
 {
@@ -260,7 +252,6 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
     g_work_directory = work_directory;
     g_fraction_done.store(0.0);
     g_checkpoint_count.store(0);
-    g_last_checkpoint_ms.store(steady_ms());
 
     close_input_file();
 
@@ -269,6 +260,14 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
         remove_work_file(L"period_search_out");
         remove_work_file(L"period_search_state");
         remove_work_file(L"temp");
+    }
+
+    const std::wstring input_probe = read_work_file(L"period_search_in");
+    if (input_probe.empty())
+    {
+        result.exit_code = -2002;
+        result.error = L"period_search_in is missing or empty before solver start";
+        return result;
     }
 
     const auto started = std::chrono::steady_clock::now();
@@ -297,9 +296,11 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
 
     result.elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     result.fraction_done = g_fraction_done.load();
-    result.checkpoints = g_checkpoint_count.load();
+    result.checkpoints = 0;
     result.output = read_work_file(L"period_search_out");
 
+    if (result.exit_code != 0 && result.error.empty())
+        result.error = exit_error_text(result.exit_code);
     if (result.exit_code == 0 && result.output.empty() && result.error.empty())
         result.error = L"PeriodSearch returned success but period_search_out is empty";
 
@@ -307,5 +308,5 @@ PeriodSearchRunResult periodsearch_run(const std::wstring& work_directory, bool 
 }
 
 double periodsearch_progress() { return g_fraction_done.load(); }
-unsigned int periodsearch_checkpoint_count() { return g_checkpoint_count.load(); }
-void periodsearch_set_checkpoint_interval(unsigned int seconds) { g_checkpoint_interval_seconds.store(seconds); }
+unsigned int periodsearch_checkpoint_count() { return 0; }
+void periodsearch_set_checkpoint_interval(unsigned int) {}
