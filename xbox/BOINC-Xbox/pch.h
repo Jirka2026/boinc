@@ -15,3 +15,13 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+
+// C++/CX compatibility for the v0.8 integration source.
+// Uri is declared in Windows::Foundation, while AppV08 uses it unqualified.
+using namespace Windows::Foundation;
+
+// "generic" is a C++/CX contextual keyword. AppV08 uses it as a local variable.
+#define generic generic_url
+
+// Windows::System exposes Diagnostics; rename the local AppV08 helper token.
+#define Diagnostics ServerDiagnostics
