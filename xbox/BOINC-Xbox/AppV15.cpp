@@ -1546,7 +1546,7 @@ namespace BOINC_Xbox
             log->Text = ref new String(L"");
 
             append(L"BOINC Xbox v1.5 consolidated validation suite started.");
-            append(L"v1.5 bundle: 12-check preflight + protocol-stage verification + scheduler wait validation + persistent final evidence + production soak testing.");
+            append(L"v1.5 bundle: 14-check preflight + optimization lab + protocol-stage verification + scheduler wait validation + persistent final evidence + production soak testing.");
             append(L"Stable CPU science path remains single-instance for numerical safety; scheduler cadence is optimized independently.");
             append(L"Scheduler policy extra=" + std::to_wstring(session->success_delay_s) +
                 L" s; initial server hint=" + std::to_wstring(session->server_delay_hint_s) +
