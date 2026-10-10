@@ -13,7 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="AppV15.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="AppV16.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="PeriodSearchXbox.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="..\..\client\xbox\xbox_platform.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
